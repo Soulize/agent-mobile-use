@@ -1665,6 +1665,25 @@ func runTargetedInput(command string) (*targetedInputResult, error) {
 	return &res, nil
 }
 
+func setOverlayKeyFocusSuspended(suspended bool) error {
+	value := "false"
+	if suspended {
+		value = "true"
+	}
+	cmd := exec.Command(
+		"/system/bin/am", "broadcast", "--user", "0",
+		"-n", "com.agent.mobileuse/.NotifyReceiver",
+		"-a", "com.agent.mobileuse.ACTION_AGENT_KEY_FOCUS",
+		"--ez", "suspended", value,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("overlay key-focus broadcast failed: %v (%s)",
+			err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func executeLaunch(targetDid int, rawPackage, activity string, user *int) (string, error) {
 	pkg, act, userId := normalizeLaunchTarget(rawPackage, activity, user)
 	if pkg == "" {
@@ -2025,7 +2044,8 @@ func main() {
 
 			actionDesc := fmt.Sprintf("OK: Tapped %s(%d, %d)%s", targetDesc, x, y, inputTarget)
 			if p.DurationMs > 0 {
-				actionDesc = fmt.Sprintf("OK: Long-pressed %s(%d, %d) for %dms", targetDesc, x, y, p.DurationMs)
+				actionDesc = fmt.Sprintf("OK: Long-pressed %s(%d, %d) for %dms%s",
+					targetDesc, x, y, p.DurationMs, inputTarget)
 			}
 
 			// Restore physical transition buffer (350ms) + 2x 200ms backoff retry
@@ -2134,7 +2154,43 @@ func main() {
 				return
 			}
 			kc := parseKeycode(keyName)
-			exec.Command("/system/bin/input", "-d", did, "keyevent", kc).Run()
+			var keyTarget string
+
+			if targetDid == 0 && getCurrentMode() == "foreground" {
+				if err := setOverlayKeyFocusSuspended(true); err != nil {
+					json.NewEncoder(w).Encode(ActionResponse{
+						Success: false,
+						Message: fmt.Sprintf("Could not hand keyboard focus to foreground app: %v", err),
+					})
+					return
+				}
+
+				restored := false
+				restoreOverlayFocus := func() {
+					if restored {
+						return
+					}
+					restored = true
+					if err := setOverlayKeyFocusSuspended(false); err != nil {
+						log.Printf("[key-focus] failed to restore DSH focusable state: %v", err)
+					}
+				}
+				defer restoreOverlayFocus()
+
+				res, injectErr := runTargetedInput(fmt.Sprintf(
+					"key_targeted %d %s", targetDid, kc))
+				restoreOverlayFocus()
+				if injectErr != nil {
+					json.NewEncoder(w).Encode(ActionResponse{
+						Success: false,
+						Message: fmt.Sprintf("Targeted foreground key failed: %v", injectErr),
+					})
+					return
+				}
+				keyTarget = fmt.Sprintf(" -> %s(uid=%d)", res.Package, res.UID)
+			} else {
+				exec.Command("/system/bin/input", "-d", did, "keyevent", kc).Run()
+			}
 
 			// Restore keybuffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
@@ -2145,7 +2201,7 @@ func main() {
 			}
 			json.NewEncoder(w).Encode(ActionResponse{
 				Success: true,
-				Message: fmt.Sprintf("OK: Pressed key '%s'", keyName),
+				Message: fmt.Sprintf("OK: Pressed key '%s'%s", keyName, keyTarget),
 				Data:    textStr,
 			})
 
