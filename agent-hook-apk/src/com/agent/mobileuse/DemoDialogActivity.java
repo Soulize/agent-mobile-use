@@ -176,6 +176,22 @@ public class DemoDialogActivity extends Activity {
     private ValueCallback<Uri[]> mFilePathCallback;
     private String mTargetSessionId = null;
     private String mTargetUrl = null;
+    private volatile boolean mPageFinished = false;
+    private boolean mStartupFadeScheduled = false;
+
+    private final Runnable mStartupFadeRunnable = new Runnable() {
+        @Override
+        public void run() {
+            mStartupFadeScheduled = false;
+            if (mWebView != null && mWebView.getAlpha() < 1f) {
+                mWebView.animate()
+                        .alpha(1f)
+                        .setDuration(240)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                        .start();
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -373,6 +389,11 @@ public class DemoDialogActivity extends Activity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 Log.i(TAG, "onPageStarted: " + url);
+                mPageFinished = false;
+                if (mStartupFadeScheduled && mWebView != null) {
+                    mWebView.removeCallbacks(mStartupFadeRunnable);
+                    mStartupFadeScheduled = false;
+                }
                 SharedPreferences spTheme = getSharedPreferences("agent_auth_prefs", Context.MODE_PRIVATE);
                 boolean isTrans = spTheme.getBoolean("enable_translucent_theme", true);
                 if (isTrans) {
@@ -401,6 +422,7 @@ public class DemoDialogActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 Log.i(TAG, "onPageFinished: " + url);
+                mPageFinished = true;
                 view.clearHistory();
                 injectMobileOverlay(view);
 
@@ -618,20 +640,17 @@ public class DemoDialogActivity extends Activity {
 
             view.evaluateJavascript(sb.toString(), null);
 
-            // Keep one shared 240ms fade-in for the entire WebView, including overlay buttons.
-            if (mWebView != null && mWebView.getAlpha() < 1f) {
-                mWebView.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (mWebView != null && mWebView.getAlpha() < 1f) {
-                            mWebView.animate()
-                                    .alpha(1f)
-                                    .setDuration(240)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                    .start();
-                        }
+            // Normal mode keeps the original timing. Fast start waits for page completion,
+            // gives the injected SPA UI 200ms to settle, then fades the whole WebView in for 240ms.
+            if (mWebView != null && mWebView.getAlpha() < 1f && !mStartupFadeScheduled) {
+                if (!enableFastStart || mPageFinished) {
+                    mStartupFadeScheduled = true;
+                    if (enableFastStart) {
+                        mWebView.postDelayed(mStartupFadeRunnable, 200L);
+                    } else {
+                        mWebView.post(mStartupFadeRunnable);
                     }
-                });
+                }
             }
         } catch (Throwable t) {
             Log.e(TAG, "injectMobileOverlay error: " + t.getMessage(), t);
@@ -925,6 +944,10 @@ public class DemoDialogActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (mWebView != null && mStartupFadeScheduled) {
+            mWebView.removeCallbacks(mStartupFadeRunnable);
+            mStartupFadeScheduled = false;
+        }
         if (mPendingPermissionRequest != null) {
             try {
                 mPendingPermissionRequest.deny();
