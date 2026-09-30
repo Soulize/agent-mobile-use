@@ -180,6 +180,39 @@ public class ToolMain {
         return false;
     }
 
+    private static final String AGENT_OVERLAY_PACKAGE = "com.agent.mobileuse";
+
+    /**
+     * Local control windows live on Display 0 above the app the agent is operating.
+     * They must never become part of the model's observation: doing so makes node ids,
+     * focused inputs and visible labels describe the DSH overlay instead of the target app.
+     */
+    private static boolean isAgentOverlayWindow(Object win, AccessibilityNodeInfo root) {
+        if (root != null) {
+            try {
+                CharSequence pkg = root.getPackageName();
+                if (pkg != null && AGENT_OVERLAY_PACKAGE.equals(pkg.toString())) return true;
+            } catch (Throwable ignored) {}
+        }
+        if (win != null) {
+            try {
+                CharSequence pkg = (CharSequence) win.getClass()
+                        .getMethod("getPackageName").invoke(win);
+                if (pkg != null && AGENT_OVERLAY_PACKAGE.equals(pkg.toString())) return true;
+            } catch (Throwable ignored) {}
+            try {
+                CharSequence title = (CharSequence) win.getClass().getMethod("getTitle").invoke(win);
+                if (title != null) {
+                    String s = title.toString();
+                    if ("AgentMobileEdgeGlow".equals(s) || s.contains(AGENT_OVERLAY_PACKAGE)) {
+                        return true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
     /**
      * Window titles that WindowManager reports as owned by a system-chrome package,
      * keyed by title and by package.
@@ -784,6 +817,13 @@ public class ToolMain {
                                 AccessibilityNodeInfo rootNode =
                                         (rootObj instanceof AccessibilityNodeInfo)
                                                 ? (AccessibilityNodeInfo) rootObj : null;
+
+                                // Foreground mode uses physical Display 0. Keep the local DSH
+                                // control overlay out of the model's tree so the observation
+                                // continues through to the actual app underneath.
+                                if (targetDisplayId == 0 && isAgentOverlayWindow(win, rootNode)) {
+                                    continue;
+                                }
 
                                 // The opt-in system-chrome filter. Dropped windows are NOT
                                 // counted in windowCount, so `windows=` keeps describing the
@@ -1908,6 +1948,9 @@ public class ToolMain {
                             }
                             AccessibilityNodeInfo rootNode = (rootObj instanceof AccessibilityNodeInfo)
                                     ? (AccessibilityNodeInfo) rootObj : null;
+                            if (targetDisplayId == 0 && isAgentOverlayWindow(win, rootNode)) {
+                                continue;
+                            }
                             if (dropSystemUi && isSystemUiWindow(win, chromeTitles, rootNode)) {
                                 continue;
                             }
