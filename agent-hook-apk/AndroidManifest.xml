@@ -87,6 +87,14 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".OverlayControlReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.agent.mobileuse.ACTION_AGENT_PASSTHROUGH" />
+            </intent-filter>
+        </receiver>
+
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
