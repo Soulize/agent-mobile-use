@@ -5,7 +5,10 @@ import android.graphics.Rect;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import android.content.Context;
 import android.content.Intent;
@@ -605,6 +608,278 @@ public class ToolMain {
         } catch (Throwable ignored) {}
     }
 
+    private static final class TargetInputWindow {
+        String packageName;
+        int uid;
+        int layer;
+
+        TargetInputWindow(String packageName, int uid, int layer) {
+            this.packageName = packageName;
+            this.uid = uid;
+            this.layer = layer;
+        }
+    }
+
+    private static final Map<String, Integer> sPackageUidCache =
+            new HashMap<String, Integer>();
+
+    private static int resolvePackageUid(String packageName) {
+        if (packageName == null || packageName.isEmpty()) return -1;
+        Integer cached = sPackageUidCache.get(packageName);
+        if (cached != null && cached.intValue() >= 0) return cached.intValue();
+
+        Process p = null;
+        BufferedReader r = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[] {
+                    "/system/bin/cmd", "package", "list", "packages", "-U", packageName
+            });
+            r = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                String t = line.trim();
+                if (!t.contains("package:" + packageName)) continue;
+                int ui = t.indexOf("uid:");
+                if (ui < 0) continue;
+                String tail = t.substring(ui + 4).trim();
+                int end = tail.indexOf(' ');
+                if (end > 0) tail = tail.substring(0, end);
+                int uid = Integer.parseInt(tail);
+                sPackageUidCache.put(packageName, Integer.valueOf(uid));
+                return uid;
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try { if (r != null) r.close(); } catch (Throwable ignored) {}
+            try { if (p != null) p.destroy(); } catch (Throwable ignored) {}
+        }
+        return -1;
+    }
+
+    /**
+     * Resolve the top-most non-DSH, non-system accessibility window at a point.
+     * The accessibility-overlay system_server hook keeps covered app windows in this
+     * list even while DemoDialogActivity remains visually and interactively on top.
+     */
+    private static TargetInputWindow resolveTargetInputWindow(Object uiAutomation, Class<?> uiClass,
+                                                               int displayId, int x, int y) {
+        TargetInputWindow best = null;
+        try {
+            Object displays = uiClass.getMethod("getWindowsOnAllDisplays").invoke(uiAutomation);
+            if (displays == null) return null;
+
+            Class<?> saClass = displays.getClass();
+            int n = (Integer) saClass.getMethod("size").invoke(displays);
+            Method keyAt = saClass.getMethod("keyAt", int.class);
+            Method valueAt = saClass.getMethod("valueAt", int.class);
+
+            for (int i = 0; i < n; i++) {
+                int dId = (Integer) keyAt.invoke(displays, i);
+                if (dId != displayId) continue;
+                List<?> wins = (List<?>) valueAt.invoke(displays, i);
+                if (wins == null) continue;
+
+                for (Object win : wins) {
+                    AccessibilityNodeInfo root = null;
+                    try {
+                        Object rootObj = win.getClass().getMethod("getRoot").invoke(win);
+                        if (rootObj instanceof AccessibilityNodeInfo) {
+                            root = (AccessibilityNodeInfo) rootObj;
+                        }
+                    } catch (Throwable ignored) {}
+
+                    if (isAgentOverlayWindow(win, root)) continue;
+                    if (isSystemWindow(win, root)) continue;
+                    if (root == null) continue;
+
+                    CharSequence pkgCs = null;
+                    try { pkgCs = root.getPackageName(); } catch (Throwable ignored) {}
+                    if (pkgCs == null) continue;
+                    String pkg = pkgCs.toString();
+                    if (pkg.isEmpty() || AGENT_OVERLAY_PACKAGE.equals(pkg)) continue;
+
+                    Rect bounds = new Rect();
+                    int layer = 0;
+                    try {
+                        if (win instanceof AccessibilityWindowInfo) {
+                            AccessibilityWindowInfo aw = (AccessibilityWindowInfo) win;
+                            aw.getBoundsInScreen(bounds);
+                            layer = aw.getLayer();
+                        } else {
+                            win.getClass().getMethod("getBoundsInScreen", Rect.class)
+                                    .invoke(win, bounds);
+                            Object lv = win.getClass().getMethod("getLayer").invoke(win);
+                            if (lv instanceof Integer) layer = ((Integer) lv).intValue();
+                        }
+                    } catch (Throwable ignored) {}
+
+                    if (!bounds.isEmpty() && !bounds.contains(x, y)) continue;
+
+                    int uid = resolvePackageUid(pkg);
+                    if (uid < 0) continue;
+
+                    if (best == null || layer > best.layer) {
+                        best = new TargetInputWindow(pkg, uid, layer);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return best;
+    }
+
+    private static void setInputEventDisplayId(Object event, int displayId) {
+        if (event == null) return;
+        try {
+            Class<?> inputEventClass = Class.forName("android.view.InputEvent");
+            Method m;
+            try {
+                m = inputEventClass.getMethod("setDisplayId", int.class);
+            } catch (NoSuchMethodException e) {
+                m = inputEventClass.getDeclaredMethod("setDisplayId", int.class);
+                m.setAccessible(true);
+            }
+            m.invoke(event, displayId);
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Android's targeted input injection path. Unlike /system/bin/input, passing targetUid
+     * asks InputDispatcher to direct the event to a window owned by that UID; an unrelated
+     * full-screen DSH Activity therefore cannot become the recipient.
+     */
+    private static boolean injectInputEventToUid(Object event, int targetUid) throws Throwable {
+        Class<?> imgClass = Class.forName("android.hardware.input.InputManagerGlobal");
+        Object img = imgClass.getMethod("getInstance").invoke(null);
+        Class<?> inputEventClass = Class.forName("android.view.InputEvent");
+
+        Method inject;
+        try {
+            inject = imgClass.getMethod(
+                    "injectInputEvent", inputEventClass, int.class, int.class);
+        } catch (NoSuchMethodException e) {
+            inject = imgClass.getDeclaredMethod(
+                    "injectInputEvent", inputEventClass, int.class, int.class);
+            inject.setAccessible(true);
+        }
+
+        // WAIT_FOR_FINISHED = 2 on the platform input injection API.
+        Object result = inject.invoke(img, event, 2, targetUid);
+        return result instanceof Boolean && ((Boolean) result).booleanValue();
+    }
+
+    private static MotionEvent makeTouchEvent(long downTime, int action, float x, float y,
+                                               int displayId) {
+        long now = SystemClock.uptimeMillis();
+        MotionEvent ev = MotionEvent.obtain(downTime, now, action, x, y, 0);
+        ev.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        setInputEventDisplayId(ev, displayId);
+        return ev;
+    }
+
+    private static void targetedTapWithUi(Object uiAutomation, Class<?> uiClass, int displayId,
+                                          int x, int y, int holdMs) {
+        TargetInputWindow target =
+                resolveTargetInputWindow(uiAutomation, uiClass, displayId, x, y);
+        if (target == null) {
+            System.out.print("{\"ok\":false,\"error\":\"no_underlying_target_window\"}");
+            return;
+        }
+
+        long downTime = SystemClock.uptimeMillis();
+        MotionEvent down = null;
+        MotionEvent up = null;
+        try {
+            down = makeTouchEvent(downTime, MotionEvent.ACTION_DOWN, x, y, displayId);
+            if (!injectInputEventToUid(down, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_down_failed\"}");
+                return;
+            }
+
+            int delay = holdMs > 0 ? holdMs : 30;
+            if (delay > 0) {
+                try { Thread.sleep(delay); } catch (InterruptedException ignored) {}
+            }
+
+            up = makeTouchEvent(downTime, MotionEvent.ACTION_UP, x, y, displayId);
+            if (!injectInputEventToUid(up, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_up_failed\"}");
+                return;
+            }
+
+            System.out.print("{\"ok\":true,\"package\":\"" + target.packageName
+                    + "\",\"uid\":" + target.uid + "}");
+        } catch (Throwable t) {
+            System.out.print("{\"ok\":false,\"error\":\""
+                    + oneLine(t.getClass().getSimpleName() + ": " + t.getMessage()) + "\"}");
+        } finally {
+            try { if (down != null) down.recycle(); } catch (Throwable ignored) {}
+            try { if (up != null) up.recycle(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void targetedSwipeWithUi(Object uiAutomation, Class<?> uiClass, int displayId,
+                                            int x1, int y1, int x2, int y2, int durationMs) {
+        TargetInputWindow target =
+                resolveTargetInputWindow(uiAutomation, uiClass, displayId, x1, y1);
+        if (target == null) {
+            System.out.print("{\"ok\":false,\"error\":\"no_underlying_target_window\"}");
+            return;
+        }
+
+        int duration = durationMs > 0 ? durationMs : 250;
+        int steps = Math.max(2, Math.min(60, duration / 16));
+        long downTime = SystemClock.uptimeMillis();
+        MotionEvent ev = null;
+        try {
+            ev = makeTouchEvent(downTime, MotionEvent.ACTION_DOWN, x1, y1, displayId);
+            if (!injectInputEventToUid(ev, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_down_failed\"}");
+                return;
+            }
+            ev.recycle();
+            ev = null;
+
+            long start = SystemClock.uptimeMillis();
+            for (int i = 1; i < steps; i++) {
+                long targetTime = start + ((long) duration * i / steps);
+                long sleep = targetTime - SystemClock.uptimeMillis();
+                if (sleep > 0) {
+                    try { Thread.sleep(sleep); } catch (InterruptedException ignored) {}
+                }
+
+                float f = (float) i / (float) steps;
+                float x = x1 + (x2 - x1) * f;
+                float y = y1 + (y2 - y1) * f;
+                ev = makeTouchEvent(downTime, MotionEvent.ACTION_MOVE, x, y, displayId);
+                if (!injectInputEventToUid(ev, target.uid)) {
+                    System.out.print("{\"ok\":false,\"error\":\"targeted_move_failed\"}");
+                    return;
+                }
+                ev.recycle();
+                ev = null;
+            }
+
+            long finalSleep = start + duration - SystemClock.uptimeMillis();
+            if (finalSleep > 0) {
+                try { Thread.sleep(finalSleep); } catch (InterruptedException ignored) {}
+            }
+
+            ev = makeTouchEvent(downTime, MotionEvent.ACTION_UP, x2, y2, displayId);
+            if (!injectInputEventToUid(ev, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_up_failed\"}");
+                return;
+            }
+
+            System.out.print("{\"ok\":true,\"package\":\"" + target.packageName
+                    + "\",\"uid\":" + target.uid + "}");
+        } catch (Throwable t) {
+            System.out.print("{\"ok\":false,\"error\":\""
+                    + oneLine(t.getClass().getSimpleName() + ": " + t.getMessage()) + "\"}");
+        } finally {
+            try { if (ev != null) ev.recycle(); } catch (Throwable ignored) {}
+        }
+    }
+
     private static void runDaemon() {
         HandlerThread ht = null;
         Object uiAutomation = null;
@@ -664,6 +939,29 @@ public class ToolMain {
                             if ("--no-system-ui".equals(tokens[ai])) dropSystemUi = true;
                         }
                         dumpTreeWithUi(uiAutomation, uiClass, displayId, budgetOverride, dropSystemUi);
+                    } else if ("tap_targeted".equals(action)) {
+                        if (tokens.length >= 5) {
+                            int displayId = Integer.parseInt(tokens[1]);
+                            int x = Integer.parseInt(tokens[2]);
+                            int y = Integer.parseInt(tokens[3]);
+                            int holdMs = Integer.parseInt(tokens[4]);
+                            targetedTapWithUi(uiAutomation, uiClass, displayId, x, y, holdMs);
+                        } else {
+                            System.out.print("{\"ok\":false,\"error\":\"invalid_tap_targeted\"}");
+                        }
+                    } else if ("swipe_targeted".equals(action)) {
+                        if (tokens.length >= 7) {
+                            int displayId = Integer.parseInt(tokens[1]);
+                            int x1 = Integer.parseInt(tokens[2]);
+                            int y1 = Integer.parseInt(tokens[3]);
+                            int x2 = Integer.parseInt(tokens[4]);
+                            int y2 = Integer.parseInt(tokens[5]);
+                            int durationMs = Integer.parseInt(tokens[6]);
+                            targetedSwipeWithUi(uiAutomation, uiClass, displayId,
+                                    x1, y1, x2, y2, durationMs);
+                        } else {
+                            System.out.print("{\"ok\":false,\"error\":\"invalid_swipe_targeted\"}");
+                        }
                     } else if ("type".equals(action) || "type_b64".equals(action)) {
                         if (tokens.length >= 3) {
                             int displayId = Integer.parseInt(tokens[1]);
