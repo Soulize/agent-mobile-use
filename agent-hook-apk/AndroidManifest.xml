@@ -84,6 +84,7 @@
                 <action android:name="com.agent.mobileuse.ACTION_NOTIFY" />
                 <action android:name="com.agent.mobileuse.ACTION_CLEAR" />
                 <action android:name="com.agent.mobileuse.ACTION_HANDOFF" />
+                <action android:name="com.agent.mobileuse.ACTION_AGENT_KEY_FOCUS" />
             </intent-filter>
         </receiver>
 
