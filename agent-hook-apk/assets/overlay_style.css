@@ -19,13 +19,6 @@ html[data-dsh-overlay="true"]::before {
   animation: dsh-edge-breathe-once 1.4s cubic-bezier(0.4, 0, 0.2, 1) 1 forwards !important;
 }
 
-/* Fast start skips only the one-shot edge glow.
-   The whole WebView (including overlay buttons) still fades in together for 240ms in Java. */
-html[data-dsh-overlay="true"][data-dsh-fast-start="true"]::before {
-  content: none !important;
-  animation: none !important;
-  display: none !important;
-}
 
 html[data-dsh-overlay="true"] [class*="_boot"] {
   background: transparent !important;
@@ -293,7 +286,7 @@ html[data-dsh-overlay="true"] [class*="_handle"] {
   z-index: 120 !important;
   padding: 0 !important;
   outline: none !important;
-  animation: none !important;
+  animation: dsh-btn-pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) 0.95s both !important;
   transition: transform 0.15s ease, background-color 0.15s ease !important;
 }
 .dsh-overlay-whale-btn:active {
@@ -325,7 +318,7 @@ html[data-dsh-overlay="true"] [class*="_handle"] {
   z-index: 120 !important;
   padding: 0 !important;
   outline: none !important;
-  animation: none !important;
+  animation: dsh-btn-pop-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) 0.95s both !important;
   transition: transform 0.15s ease, background-color 0.15s ease !important;
 }
 .dsh-overlay-home-btn:active {
@@ -435,7 +428,17 @@ html[data-dsh-overlay="true"] [class*="_centerCol"] {
   width: 100% !important;
   flex: 1 1 auto !important;
   min-width: 0 !important;
+  animation: dsh-fade-in 0.35s ease-out 0.95s both !important;
+}
+
+/* Fast start keeps the edge glow but removes the delayed inner entrance animations.
+   The entire WebView, including these controls, still shares the native 240ms fade-in. */
+html[data-dsh-overlay="true"][data-dsh-fast-start="true"] .dsh-overlay-whale-btn,
+html[data-dsh-overlay="true"][data-dsh-fast-start="true"] .dsh-overlay-home-btn,
+html[data-dsh-overlay="true"][data-dsh-fast-start="true"] [class*="_centerCol"] {
   animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 html[data-dsh-overlay="true"] [class*="_root"][data-phase] {
   background: transparent !important;
