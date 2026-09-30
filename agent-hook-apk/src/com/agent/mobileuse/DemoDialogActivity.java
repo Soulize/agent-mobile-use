@@ -55,6 +55,7 @@ public class DemoDialogActivity extends Activity {
 
     public static volatile boolean sIsForeground = false;
     public static volatile String sCurrentViewingSessionId = "";
+    private static volatile DemoDialogActivity sInstance = null;
 
     public static void reportViewState(final boolean foreground, final String sessionId) {
         new Thread(new Runnable() {
@@ -177,9 +178,14 @@ public class DemoDialogActivity extends Activity {
     private String mTargetSessionId = null;
     private String mTargetUrl = null;
 
+    private boolean mAgentPassthrough = false;
+    private int mPassthroughOriginalFlags = 0;
+    private int mPassthroughOriginalA11yImportance = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sInstance = this;
         overridePendingTransition(0, 0);
 
         Intent intent = getIntent();
@@ -863,19 +869,48 @@ public class DemoDialogActivity extends Activity {
         }
     }
 
-    @Override
-    public void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        // The window must be attached before its SurfaceControl exists. Applying
-        // SKIP_SCREENSHOT here avoids privileged WindowManager private flags that
-        // would make an ordinary application window fail to open.
-        try {
-            Window window = getWindow();
-            if (window != null) {
-                CaptureExclusion.markView(window.getDecorView());
+    /**
+     * Temporarily keep this overlay visible while letting agent input/accessibility pass
+     * through to the application below it. This is used only for short foreground tool
+     * operations; it does not hide or recreate the WebView.
+     */
+    public static void setAgentPassthrough(final boolean enabled) {
+        final DemoDialogActivity activity = sInstance;
+        if (activity == null) return;
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                activity.applyAgentPassthrough(enabled);
             }
-        } catch (Throwable t) {
-            Log.w(TAG, "Capture exclusion unavailable; continuing normally", t);
+        });
+    }
+
+    private void applyAgentPassthrough(boolean enabled) {
+        Window window = getWindow();
+        if (window == null || mAgentPassthrough == enabled) return;
+
+        View decor = window.getDecorView();
+        WindowManager.LayoutParams lp = window.getAttributes();
+        if (enabled) {
+            mPassthroughOriginalFlags = lp.flags;
+            if (decor != null) {
+                mPassthroughOriginalA11yImportance = decor.getImportantForAccessibility();
+                decor.setImportantForAccessibility(
+                        View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+            }
+            lp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            window.setAttributes(lp);
+            mAgentPassthrough = true;
+            Log.i(TAG, "Agent passthrough enabled");
+        } else {
+            lp.flags = mPassthroughOriginalFlags;
+            window.setAttributes(lp);
+            if (decor != null) {
+                decor.setImportantForAccessibility(mPassthroughOriginalA11yImportance);
+            }
+            mAgentPassthrough = false;
+            Log.i(TAG, "Agent passthrough disabled");
         }
     }
 
@@ -932,6 +967,9 @@ public class DemoDialogActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (sInstance == this) {
+            sInstance = null;
+        }
         super.onDestroy();
         if (mPendingPermissionRequest != null) {
             try {
