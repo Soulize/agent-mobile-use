@@ -2,6 +2,22 @@
 
 This branch isolates build-system modernization from runtime behavior changes.
 
+## Current result
+
+The modern toolchain has been validated by GitHub Actions end-to-end.
+
+- Successful workflow: Modern build toolchain run #7
+- Hook APK: Gradle/AGP build succeeded
+- Java device tools: D8 outputs succeeded
+- Go daemon: android/arm64 cross-build succeeded
+- KernelSU ZIP: integrity check succeeded
+- Artifact upload: succeeded
+- Legacy source/build scripts remain untouched
+
+This proves the old Java 8 runtime, `dx`, API 23 build platform, and hard-coded
+`/root` / `/usr/lib/android-sdk` paths are build-environment legacy constraints,
+not requirements of the current project source.
+
 ## Scope
 
 The experiment keeps the existing runtime architecture and legacy Xposed API 82.
