@@ -32,7 +32,7 @@ jobs:
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y android-sdk android-sdk-build-tools android-sdk-platform-23 aapt apksigner zipalign zip
+          sudo apt-get install -y android-sdk android-sdk-build-tools android-sdk-platform-23 dalvik-exchange aapt apksigner zipalign zip
           test -f /usr/lib/android-sdk/platforms/android-23/android.jar
           test -x /usr/lib/android-sdk/build-tools/debian/dx
           command -v aapt
