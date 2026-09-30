@@ -84,6 +84,7 @@ public class SettingsActivity extends Activity {
     // Tab 1 Views (DSH Core & Auth)
     private EditText mEtSecret;
     private Switch mSwitchTranslucentTheme;
+    private Switch mSwitchStartupAnimation;
     private Switch mSwitchFloatingWhale;
     private Switch mSwitchKeyboardAssist;
 
@@ -150,6 +151,17 @@ public class SettingsActivity extends Activity {
             getSharedPreferences(PREFS_AUTH, Context.MODE_PRIVATE)
                     .edit().putBoolean("enable_translucent_theme", isChecked).commit();
             Toast.makeText(SettingsActivity.this, isChecked ? "毛玻璃透明主题已开启" : "已恢复 DSH 原生纯黑实色主题", Toast.LENGTH_SHORT).show();
+        }
+    };
+
+    private final CompoundButton.OnCheckedChangeListener mStartupAnimationChangeListener = new CompoundButton.OnCheckedChangeListener() {
+        @Override
+        public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+            getSharedPreferences(PREFS_AUTH, Context.MODE_PRIVATE)
+                    .edit().putBoolean("enable_startup_animation", isChecked).commit();
+            Toast.makeText(SettingsActivity.this,
+                    isChecked ? "控制台启动动画已开启" : "控制台启动动画已关闭",
+                    Toast.LENGTH_SHORT).show();
         }
     };
 
@@ -563,6 +575,12 @@ public class SettingsActivity extends Activity {
         clientPrefsCard.addView(rowTranslucent);
         clientPrefsCard.addView(createCardDivider());
 
+        mSwitchStartupAnimation = new Switch(this);
+        LinearLayout rowStartupAnimation = createSwitchRow("启动光圈与淡入动画", mSwitchStartupAnimation);
+        mSwitchStartupAnimation.setOnCheckedChangeListener(mStartupAnimationChangeListener);
+        clientPrefsCard.addView(rowStartupAnimation);
+        clientPrefsCard.addView(createCardDivider());
+
         mSwitchFloatingWhale = new Switch(this);
         LinearLayout rowWhale = createSwitchRow("悬浮控制球与快捷条", mSwitchFloatingWhale);
         mSwitchFloatingWhale.setOnCheckedChangeListener(mFloatingWhaleChangeListener);
@@ -789,6 +807,7 @@ public class SettingsActivity extends Activity {
 
         SharedPreferences spAuth = getSharedPreferences(PREFS_AUTH, Context.MODE_PRIVATE);
         setSwitchCheckedSilently(mSwitchTranslucentTheme, spAuth.getBoolean("enable_translucent_theme", true), mTranslucentThemeChangeListener);
+        setSwitchCheckedSilently(mSwitchStartupAnimation, spAuth.getBoolean("enable_startup_animation", true), mStartupAnimationChangeListener);
         setSwitchCheckedSilently(mSwitchFloatingWhale, spAuth.getBoolean("enable_floating_whale", true), mFloatingWhaleChangeListener);
         setSwitchCheckedSilently(mSwitchKeyboardAssist, spAuth.getBoolean("enable_keyboard_assist", true), mKeyboardAssistChangeListener);
 
