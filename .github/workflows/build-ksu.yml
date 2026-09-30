@@ -60,7 +60,7 @@ jobs:
           sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/zipalign" /usr/bin/zipalign
           sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/apksigner" /usr/bin/apksigner
 
-          curl -fL             https://api.xposed.info/repo/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
+          curl -fL             https://artifactory.appodeal.com/appodeal-public/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
           sudo cp /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
 
       - name: Build hook APK
