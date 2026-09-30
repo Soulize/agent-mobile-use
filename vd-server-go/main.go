@@ -570,7 +570,9 @@ func startCapsuleWatchdog() {
 var overlayPassthroughMu sync.Mutex
 
 func setOverlayPassthrough(enabled bool) bool {
-	if getCurrentMode() != "foreground" {
+	// Enabling only makes sense in foreground mode. Disabling is always sent so
+	// a mid-operation mode change can never leave the overlay non-interactive.
+	if enabled && getCurrentMode() != "foreground" {
 		return false
 	}
 	value := "false"
