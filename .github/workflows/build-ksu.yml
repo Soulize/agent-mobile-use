@@ -46,7 +46,6 @@ jobs:
           STUB=/tmp/xposed-stub
           rm -rf "$STUB"
           mkdir -p "$STUB/src/de/robv/android/xposed/callbacks" "$STUB/classes"
-          sudo mkdir -p /root/xposed_lib
 
           cat > "$STUB/src/de/robv/android/xposed/IXposedHookLoadPackage.java" <<'EOF'
           package de.robv.android.xposed;
@@ -108,8 +107,7 @@ jobs:
 
           javac -source 8 -target 8 -d "$STUB/classes" $(find "$STUB/src" -name '*.java')
           jar cf /tmp/xposed-api-stub.jar -C "$STUB/classes" .
-          sudo install -m 0644 /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
-          sudo ls -lh /root/xposed_lib/xposed-api-stub.jar
+          ls -lh /tmp/xposed-api-stub.jar
 
       - name: Build Java device tools
         shell: bash
@@ -132,6 +130,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          sed -i 's#XPOSED_JAR="/root/xposed_lib/xposed-api-stub.jar"#XPOSED_JAR="/tmp/xposed-api-stub.jar"#' agent-hook-apk/build.sh
+          grep 'XPOSED_JAR=' agent-hook-apk/build.sh
           chmod +x agent-hook-apk/build.sh
           ./agent-hook-apk/build.sh
           apksigner verify --verbose agent-hook-apk/build/agent_hook.apk
