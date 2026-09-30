@@ -29,6 +29,10 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = false
+            // Keep the release variant non-debuggable while using the standard
+            // debug keystore for test/installable CI artifacts. Production
+            // signing can be introduced separately without changing bytecode.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -44,8 +48,8 @@ dependencies {
 }
 
 tasks.register<Copy>("packageHookApk") {
-    dependsOn("assembleDebug")
-    from(layout.buildDirectory.dir("outputs/apk/debug")) {
+    dependsOn("assembleRelease")
+    from(layout.buildDirectory.dir("outputs/apk/release")) {
         include("*.apk")
         rename { "agent_hook.apk" }
     }
