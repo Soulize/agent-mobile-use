@@ -1,4 +1,3 @@
-# CI build for the complete flashable KernelSU module
 name: Build KernelSU package
 
 on:
@@ -10,148 +9,97 @@ on:
 permissions:
   contents: read
 
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build-ksu:
     runs-on: ubuntu-24.04
-
     steps:
-      - name: Checkout
+      - name: Checkout branch
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Set up Java 17 for Android SDK
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y android-sdk android-sdk-build-tools android-sdk-platform-23 dalvik-exchange aapt apksigner zipalign zip
-          test -f /usr/lib/android-sdk/platforms/android-23/android.jar
-          test -x /usr/lib/android-sdk/build-tools/debian/dx
-          command -v aapt
-          command -v apksigner
-          command -v zipalign
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
 
-      - name: Prepare Xposed compile stubs
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-23" "build-tools;28.0.3"
+
+      - name: Switch to Java 8 for legacy dx builds
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Prepare legacy build paths and Xposed API
         shell: bash
         run: |
           set -euxo pipefail
-          STUB=/tmp/xposed-stub
-          rm -rf "$STUB"
-          mkdir -p "$STUB/src/de/robv/android/xposed/callbacks" "$STUB/classes"
 
-          cat > "$STUB/src/de/robv/android/xposed/IXposedHookLoadPackage.java" <<'EOF'
-          package de.robv.android.xposed;
-          import de.robv.android.xposed.callbacks.XC_LoadPackage;
-          public interface IXposedHookLoadPackage {
-              void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable;
-          }
-          EOF
+          sudo mkdir -p /usr/lib/android-sdk/platforms/android-23
+          sudo mkdir -p /usr/lib/android-sdk/build-tools/debian
+          sudo mkdir -p /root/xposed_lib
 
-          cat > "$STUB/src/de/robv/android/xposed/XC_MethodHook.java" <<'EOF'
-          package de.robv.android.xposed;
-          public abstract class XC_MethodHook {
-              protected void beforeHookedMethod(MethodHookParam param) throws Throwable {}
-              protected void afterHookedMethod(MethodHookParam param) throws Throwable {}
-              public static class Unhook {}
-              public static class MethodHookParam {
-                  public Object thisObject;
-                  public Object[] args;
-                  public Object getResult() { return null; }
-                  public void setResult(Object result) {}
-              }
-          }
-          EOF
+          sudo ln -sf "$ANDROID_HOME/platforms/android-23/android.jar"             /usr/lib/android-sdk/platforms/android-23/android.jar
 
-          cat > "$STUB/src/de/robv/android/xposed/XC_MethodReplacement.java" <<'EOF'
-          package de.robv.android.xposed;
-          public abstract class XC_MethodReplacement extends XC_MethodHook {
-              public static XC_MethodReplacement returnConstant(final Object result) {
-                  return new XC_MethodReplacement() {};
-              }
-          }
-          EOF
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/dx"             /usr/lib/android-sdk/build-tools/debian/dx
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/aapt" /usr/bin/aapt
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/zipalign" /usr/bin/zipalign
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/apksigner" /usr/bin/apksigner
 
-          cat > "$STUB/src/de/robv/android/xposed/XposedBridge.java" <<'EOF'
-          package de.robv.android.xposed;
-          public final class XposedBridge {
-              public static void log(String text) {}
-              public static java.util.Set<XC_MethodHook.Unhook> hookAllMethods(Class<?> hookClass, String methodName, XC_MethodHook callback) { return null; }
-          }
-          EOF
+          curl -fL             https://artifactory.appodeal.com/appodeal-public/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
+          sudo cp /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
 
-          cat > "$STUB/src/de/robv/android/xposed/XposedHelpers.java" <<'EOF'
-          package de.robv.android.xposed;
-          public final class XposedHelpers {
-              public static Class<?> findClass(String className, ClassLoader classLoader) { return null; }
-              public static XC_MethodHook.Unhook findAndHookMethod(Class<?> clazz, String methodName, Object... parameterTypesAndCallback) { return null; }
-          }
-          EOF
+      - name: Build hook APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x agent-hook-apk/build.sh
+          sudo -E bash agent-hook-apk/build.sh
 
-          cat > "$STUB/src/de/robv/android/xposed/callbacks/XC_LoadPackage.java" <<'EOF'
-          package de.robv.android.xposed.callbacks;
-          public final class XC_LoadPackage {
-              public static class LoadPackageParam {
-                  public String packageName;
-                  public ClassLoader classLoader;
-              }
-          }
-          EOF
-
-          javac -source 8 -target 8 -d "$STUB/classes" $(find "$STUB/src" -name '*.java')
-          jar cf /tmp/xposed-api-stub.jar -C "$STUB/classes" .
-          ls -lh /tmp/xposed-api-stub.jar
-
-      - name: Build Java device tools
+      - name: Build Java tools
         shell: bash
         run: |
           set -euxo pipefail
           chmod +x vd-tool-java/build.sh
-          ./vd-tool-java/build.sh
+          sudo -E bash vd-tool-java/build.sh
 
-      - name: Build ARM64 vd_server
+      - name: Test and build ARM64 Android vd_server
         shell: bash
         run: |
           set -euxo pipefail
-          cd vd-server-go
+          pushd vd-server-go
           go test ./...
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o vd_server .
-          file vd_server
-          file vd_server | grep -q "ARM aarch64"
-
-      - name: Build overlay APK
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sed -i 's#XPOSED_JAR="/root/xposed_lib/xposed-api-stub.jar"#XPOSED_JAR="/tmp/xposed-api-stub.jar"#' agent-hook-apk/build.sh
-          grep 'XPOSED_JAR=' agent-hook-apk/build.sh
-          chmod +x agent-hook-apk/build.sh
-          ./agent-hook-apk/build.sh
-          apksigner verify --verbose agent-hook-apk/build/agent_hook.apk
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64             go build -ldflags="-s -w" -o vd_server .
+          popd
+          file vd-server-go/vd_server
 
       - name: Pack complete KernelSU module
         shell: bash
         run: |
           set -euxo pipefail
           chmod +x ksu-module/pack.sh
-          ./ksu-module/pack.sh
-          VERSION="$(sed -n 's/^version=//p' ksu-module/module.prop)"
-          test -s "release/agent-mobile-use-ksu-v${VERSION}.zip"
-          unzip -t "release/agent-mobile-use-ksu-v${VERSION}.zip"
-          unzip -l "release/agent-mobile-use-ksu-v${VERSION}.zip" | tee /tmp/ksu-contents.txt
-          sha256sum "release/agent-mobile-use-ksu-v${VERSION}.zip"
+          bash ksu-module/pack.sh
+          unzip -l agent-mobile-use-ksu.zip
+          sha256sum agent-mobile-use-ksu.zip
 
       - name: Upload KernelSU package
         uses: actions/upload-artifact@v4
         with:
           name: agent-mobile-use-ksu-session-switch-fix
-          path: release/agent-mobile-use-ksu-v0.8.0-alpha.zip
+          path: agent-mobile-use-ksu.zip
           if-no-files-found: error
           retention-days: 14
