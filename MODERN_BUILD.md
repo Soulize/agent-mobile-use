@@ -7,7 +7,7 @@ This branch isolates build-system modernization from runtime behavior changes.
 The modern toolchain has been validated by GitHub Actions end-to-end.
 
 - Successful workflow: Modern build toolchain run #7
-- Hook APK: Gradle/AGP build succeeded
+- Hook APK: Gradle/AGP release build succeeded
 - Java device tools: D8 outputs succeeded
 - Go daemon: android/arm64 cross-build succeeded
 - KernelSU ZIP: integrity check succeeded
@@ -100,3 +100,11 @@ contains those framework APIs.
 
 If the experiment succeeds, the next cleanup step is to add and commit a Gradle Wrapper,
 then make the CI and local build use `./gradlew` exclusively.
+
+
+## Release variant
+
+The hook APK is built from the Gradle `release` variant. R8/minification remains disabled
+for parity testing. CI uses the standard debug keystore only as a signing credential so the
+release APK is directly installable; this does not turn the release variant into a debuggable build.
+Production signing should be configured separately before publishing official releases.
