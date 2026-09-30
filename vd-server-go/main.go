@@ -1639,6 +1639,32 @@ func resolveTarget(targetDid int, targetSpec string) (int, int, error) {
 	return res.X, res.Y, nil
 }
 
+type targetedInputResult struct {
+	OK      bool   `json:"ok"`
+	Package string `json:"package"`
+	UID     int    `json:"uid"`
+	Error   string `json:"error"`
+}
+
+func runTargetedInput(command string) (*targetedInputResult, error) {
+	out, err := globalDumpDaemon.Request(command)
+	if err != nil {
+		return nil, fmt.Errorf("targeted input daemon request failed: %w", err)
+	}
+	trimmed := strings.TrimSpace(out)
+	var res targetedInputResult
+	if err := json.Unmarshal([]byte(trimmed), &res); err != nil {
+		return nil, fmt.Errorf("invalid targeted input response: %s", trimmed)
+	}
+	if !res.OK {
+		if res.Error == "" {
+			res.Error = "unknown targeted input failure"
+		}
+		return &res, fmt.Errorf("%s", res.Error)
+	}
+	return &res, nil
+}
+
 func executeLaunch(targetDid int, rawPackage, activity string, user *int) (string, error) {
 	pkg, act, userId := normalizeLaunchTarget(rawPackage, activity, user)
 	if pkg == "" {
@@ -1972,21 +1998,32 @@ func main() {
 				return
 			}
 
-			if targetDid == 0 {
+			var inputTarget string
+			if targetDid == 0 && getCurrentMode() == "foreground" {
 				if p.DurationMs > 0 {
 					broadcastTouch(2, 0, 0, x, y, x, y, p.DurationMs)
 				} else {
 					broadcastTouch(1, x, y, 0, 0, 0, 0, 0)
 				}
-			}
-			if p.DurationMs > 0 {
+
+				res, injectErr := runTargetedInput(fmt.Sprintf(
+					"tap_targeted %d %d %d %d", targetDid, x, y, p.DurationMs))
+				if injectErr != nil {
+					json.NewEncoder(w).Encode(ActionResponse{
+						Success: false,
+						Message: fmt.Sprintf("Targeted foreground click failed: %v", injectErr),
+					})
+					return
+				}
+				inputTarget = fmt.Sprintf(" -> %s(uid=%d)", res.Package, res.UID)
+			} else if p.DurationMs > 0 {
 				exec.Command("/system/bin/input", "-d", did, "swipe",
 					strconv.Itoa(x), strconv.Itoa(y), strconv.Itoa(x), strconv.Itoa(y), strconv.Itoa(p.DurationMs)).Run()
 			} else {
 				exec.Command("/system/bin/input", "-d", did, "tap", strconv.Itoa(x), strconv.Itoa(y)).Run()
 			}
 
-			actionDesc := fmt.Sprintf("OK: Tapped %s(%d, %d)", targetDesc, x, y)
+			actionDesc := fmt.Sprintf("OK: Tapped %s(%d, %d)%s", targetDesc, x, y, inputTarget)
 			if p.DurationMs > 0 {
 				actionDesc = fmt.Sprintf("OK: Long-pressed %s(%d, %d) for %dms", targetDesc, x, y, p.DurationMs)
 			}
@@ -2056,8 +2093,23 @@ func main() {
 			if dur <= 0 {
 				dur = 250
 			}
-			exec.Command("/system/bin/input", "-d", did, "swipe",
-				strconv.Itoa(x1), strconv.Itoa(y1), strconv.Itoa(x2), strconv.Itoa(y2), strconv.Itoa(dur)).Run()
+			var swipeTarget string
+			if targetDid == 0 && getCurrentMode() == "foreground" {
+				res, injectErr := runTargetedInput(fmt.Sprintf(
+					"swipe_targeted %d %d %d %d %d %d",
+					targetDid, x1, y1, x2, y2, dur))
+				if injectErr != nil {
+					json.NewEncoder(w).Encode(ActionResponse{
+						Success: false,
+						Message: fmt.Sprintf("Targeted foreground swipe failed: %v", injectErr),
+					})
+					return
+				}
+				swipeTarget = fmt.Sprintf(" -> %s(uid=%d)", res.Package, res.UID)
+			} else {
+				exec.Command("/system/bin/input", "-d", did, "swipe",
+					strconv.Itoa(x1), strconv.Itoa(y1), strconv.Itoa(x2), strconv.Itoa(y2), strconv.Itoa(dur)).Run()
+			}
 
 			// Restore inertia settling buffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
@@ -2068,7 +2120,7 @@ func main() {
 			}
 			json.NewEncoder(w).Encode(ActionResponse{
 				Success: true,
-				Message: fmt.Sprintf("OK: Swiped (%d, %d) -> (%d, %d) in %dms", x1, y1, x2, y2, dur),
+				Message: fmt.Sprintf("OK: Swiped (%d, %d) -> (%d, %d) in %dms%s", x1, y1, x2, y2, dur, swipeTarget),
 				Data:    textStr,
 			})
 
