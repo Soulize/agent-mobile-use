@@ -440,6 +440,10 @@ public class GlowService extends Service {
             lp.gravity = Gravity.TOP | Gravity.LEFT;
             lp.setTitle("AgentMobileEdgeGlow");
 
+            // This visual indicator belongs to the local control UI, not the target app.
+            // Mark it SKIP_SCREENSHOT before WindowManager creates its Surface.
+            CaptureExclusion.markLayoutParams(lp);
+
             // Allow overlay to extend into cutout / notch / status bar area (LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS = 3)
             try {
                 java.lang.reflect.Field cutoutField = WindowManager.LayoutParams.class.getField("layoutInDisplayCutoutMode");
@@ -453,6 +457,7 @@ public class GlowService extends Service {
             } catch (Throwable ignored) {}
 
             mWindowManager.addView(mGlowView, lp);
+            CaptureExclusion.markView(mGlowView);
             mGlowView.startPulseAnimation();
 
             registerTouchReceiver();
