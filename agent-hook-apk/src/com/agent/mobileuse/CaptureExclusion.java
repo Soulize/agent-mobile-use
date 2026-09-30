@@ -2,61 +2,24 @@ package com.agent.mobileuse;
 
 import android.util.Log;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Best-effort screenshot exclusion for the local DSH overlay surfaces.
+ * Best-effort screenshot exclusion for an already attached local overlay Surface.
  *
- * Android's hidden PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY maps to
- * SurfaceControl.SKIP_SCREENSHOT in WindowManagerService. That is the behavior
- * we want here: omit only this overlay layer while leaving the app underneath
- * visible in screencap / screen recording.
+ * Do NOT use PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY from an ordinary app window:
+ * WindowManager treats that flag as an internal-system-window capability and denies
+ * adding the window when the caller lacks INTERNAL_SYSTEM_WINDOW.
  *
- * The SurfaceControl transaction is a second, post-attach fallback for OEM
- * builds that recreate or rewrite the window surface after LayoutParams are
- * submitted.
+ * Instead, once the view is attached, mark only the app-owned SurfaceControl with
+ * SKIP_SCREENSHOT. If an OEM blocks the hidden SurfaceControl API, this fails open:
+ * the overlay remains usable and only screenshot exclusion is unavailable.
  */
 final class CaptureExclusion {
     private static final String TAG = "CaptureExclusion";
-    private static final int PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY = 0x00100000;
 
     private CaptureExclusion() {}
-
-    static void markWindow(Window window) {
-        if (window == null) return;
-        try {
-            WindowManager.LayoutParams lp = window.getAttributes();
-            markLayoutParams(lp);
-            window.setAttributes(lp);
-        } catch (Throwable t) {
-            Log.w(TAG, "Failed to mark window LayoutParams: " + t.getMessage());
-        }
-
-        try {
-            markView(window.getDecorView());
-        } catch (Throwable ignored) {}
-    }
-
-    static void markLayoutParams(WindowManager.LayoutParams lp) {
-        if (lp == null) return;
-        try {
-            Field f;
-            try {
-                f = WindowManager.LayoutParams.class.getField("privateFlags");
-            } catch (NoSuchFieldException e) {
-                f = WindowManager.LayoutParams.class.getDeclaredField("privateFlags");
-                f.setAccessible(true);
-            }
-            int flags = f.getInt(lp);
-            f.setInt(lp, flags | PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY);
-        } catch (Throwable t) {
-            Log.w(TAG, "PRIVATE_FLAG screenshot exclusion unavailable: " + t.getMessage());
-        }
-    }
 
     static void markView(final View view) {
         if (view == null) return;
@@ -104,11 +67,14 @@ final class CaptureExclusion {
             try {
                 transactionClass.getMethod("close").invoke(transaction);
             } catch (Throwable ignored) {}
+
+            Log.i(TAG, "SKIP_SCREENSHOT applied to attached overlay Surface");
         } catch (Throwable t) {
             if (retriesLeft > 0) {
                 retry(view, retriesLeft);
             } else {
-                Log.w(TAG, "SurfaceControl screenshot exclusion unavailable: " + t.getMessage());
+                Log.w(TAG, "SurfaceControl screenshot exclusion unavailable; overlay left usable: "
+                        + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
         }
     }
