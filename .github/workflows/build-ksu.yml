@@ -77,12 +77,14 @@ jobs:
           chmod +x vd-tool-java/build.sh
           sudo -E bash vd-tool-java/build.sh
 
-      - name: Build ARM64 Android vd_server
+      - name: Test and build ARM64 Android vd_server
         shell: bash
         run: |
           set -euxo pipefail
-          chmod +x vd-server-go/build.sh
-          GOOS=android GOARCH=arm64 bash vd-server-go/build.sh
+          pushd vd-server-go
+          go test ./...
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64             go build -ldflags="-s -w" -o vd_server .
+          popd
           file vd-server-go/vd_server
 
       - name: Pack complete KernelSU module
