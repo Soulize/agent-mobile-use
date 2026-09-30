@@ -55,6 +55,7 @@ public class DemoDialogActivity extends Activity {
 
     public static volatile boolean sIsForeground = false;
     public static volatile String sCurrentViewingSessionId = "";
+    private static volatile DemoDialogActivity sInstance = null;
 
     public static void reportViewState(final boolean foreground, final String sessionId) {
         new Thread(new Runnable() {
@@ -176,10 +177,13 @@ public class DemoDialogActivity extends Activity {
     private ValueCallback<Uri[]> mFilePathCallback;
     private String mTargetSessionId = null;
     private String mTargetUrl = null;
+    private boolean mAgentKeyFocusSuspended = false;
+    private int mAgentKeyFocusOriginalFlags = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sInstance = this;
         overridePendingTransition(0, 0);
 
         Intent intent = getIntent();
@@ -863,6 +867,43 @@ public class DemoDialogActivity extends Activity {
         }
     }
 
+    /**
+     * Raw key events are dispatched by InputDispatcher to the globally focused window.
+     * During an Agent key action only, temporarily remove keyboard-focus eligibility from
+     * the DSH Activity while keeping the entire overlay visible and touchable. WMS then
+     * focuses the application underneath; the daemon performs UID-targeted key injection
+     * and immediately restores the original flags.
+     */
+    public static void setAgentKeyFocusSuspended(final boolean suspended) {
+        final DemoDialogActivity activity = sInstance;
+        if (activity == null) return;
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                activity.applyAgentKeyFocusSuspended(suspended);
+            }
+        });
+    }
+
+    private void applyAgentKeyFocusSuspended(boolean suspended) {
+        Window window = getWindow();
+        if (window == null || mAgentKeyFocusSuspended == suspended) return;
+
+        WindowManager.LayoutParams lp = window.getAttributes();
+        if (suspended) {
+            mAgentKeyFocusOriginalFlags = lp.flags;
+            lp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+            window.setAttributes(lp);
+            mAgentKeyFocusSuspended = true;
+            Log.i(TAG, "Agent key focus suspended");
+        } else {
+            lp.flags = mAgentKeyFocusOriginalFlags;
+            window.setAttributes(lp);
+            mAgentKeyFocusSuspended = false;
+            Log.i(TAG, "Agent key focus restored");
+        }
+    }
+
     @Override
     public void onBackPressed() {
         hideSoftInput();
@@ -916,6 +957,9 @@ public class DemoDialogActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (sInstance == this) {
+            sInstance = null;
+        }
         super.onDestroy();
         if (mPendingPermissionRequest != null) {
             try {
