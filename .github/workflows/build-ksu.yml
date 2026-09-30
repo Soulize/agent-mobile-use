@@ -32,13 +32,7 @@ jobs:
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y android-sdk android-sdk-build-tools aapt apksigner zipalign zip
-          if [ ! -f /usr/lib/android-sdk/platforms/android-23/android.jar ]; then
-            SDK_JAR="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" -name android.jar 2>/dev/null | sort -V | tail -n 1)"
-            test -n "$SDK_JAR"
-            sudo mkdir -p /usr/lib/android-sdk/platforms/android-23
-            sudo ln -sf "$SDK_JAR" /usr/lib/android-sdk/platforms/android-23/android.jar
-          fi
+          sudo apt-get install -y android-sdk android-sdk-build-tools android-sdk-platform-23 aapt apksigner zipalign zip
           test -f /usr/lib/android-sdk/platforms/android-23/android.jar
           test -x /usr/lib/android-sdk/build-tools/debian/dx
           command -v aapt
