@@ -18,6 +18,23 @@ html[data-dsh-overlay="true"]::before {
   z-index: 99999 !important;
   animation: dsh-edge-breathe-once 1.4s cubic-bezier(0.4, 0, 0.2, 1) 1 forwards !important;
 }
+
+/* Optional fast-start mode: remove only the one-shot startup presentation effects. */
+html[data-dsh-overlay="true"][data-dsh-no-startup-animation="true"]::before {
+  content: none !important;
+  animation: none !important;
+  display: none !important;
+}
+html[data-dsh-overlay="true"][data-dsh-no-startup-animation="true"] .dsh-overlay-whale-btn,
+html[data-dsh-overlay="true"][data-dsh-no-startup-animation="true"] .dsh-overlay-home-btn,
+html[data-dsh-overlay="true"][data-dsh-no-startup-animation="true"] [class*="_centerCol"] {
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
 html[data-dsh-overlay="true"] [class*="_boot"] {
   background: transparent !important;
   background-color: transparent !important;
