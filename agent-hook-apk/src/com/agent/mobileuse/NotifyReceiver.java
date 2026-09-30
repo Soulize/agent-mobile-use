@@ -23,6 +23,8 @@ public class NotifyReceiver extends BroadcastReceiver {
     public static final String ACTION_NOTIFY = "com.agent.mobileuse.ACTION_NOTIFY";
     public static final String ACTION_CLEAR = "com.agent.mobileuse.ACTION_CLEAR";
     public static final String ACTION_HANDOFF = "com.agent.mobileuse.ACTION_HANDOFF";
+    public static final String ACTION_AGENT_KEY_FOCUS =
+            "com.agent.mobileuse.ACTION_AGENT_KEY_FOCUS";
 
     public static final String CHANNEL_ID = "dsh_agent_completed";
     public static final String CHANNEL_NAME = "DeepSeek Agent 任务完成";
@@ -34,6 +36,13 @@ public class NotifyReceiver extends BroadcastReceiver {
         if (intent == null) return;
         String action = intent.getAction();
         Log.i(TAG, "onReceive action: " + action);
+
+        if (ACTION_AGENT_KEY_FOCUS.equals(action)) {
+            boolean suspended = intent.getBooleanExtra("suspended", false);
+            DemoDialogActivity.setAgentKeyFocusSuspended(suspended);
+            Log.i(TAG, "Agent key focus suspended=" + suspended);
+            return;
+        }
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) {
