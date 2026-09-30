@@ -36,6 +36,13 @@ android {
         }
     }
 
+    lint {
+        // This APK is a sideloaded KernelSU/LSPosed companion, not a Play Store app.
+        // Keep targetSdk 28 intentionally to preserve the legacy runtime behavior
+        // while modernizing only the build toolchain.
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
