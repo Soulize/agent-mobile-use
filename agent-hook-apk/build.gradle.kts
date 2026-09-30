@@ -49,5 +49,5 @@ tasks.register<Copy>("packageHookApk") {
         include("*.apk")
         rename { "agent_hook.apk" }
     }
-    into(layout.buildDirectory)
+    into(layout.buildDirectory.dir("dist"))
 }
