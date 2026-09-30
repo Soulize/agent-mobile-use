@@ -3,7 +3,7 @@ name: Build KernelSU package
 on:
   push:
     branches:
-      - fix/dsh-overlay-session-switch
+      - main
   workflow_dispatch:
 
 permissions:
@@ -99,7 +99,7 @@ jobs:
       - name: Upload KernelSU package
         uses: actions/upload-artifact@v4
         with:
-          name: agent-mobile-use-ksu-session-switch-fix
+          name: agent-mobile-use-ksu-main
           path: agent-mobile-use-ksu.zip
           if-no-files-found: error
           retention-days: 14
