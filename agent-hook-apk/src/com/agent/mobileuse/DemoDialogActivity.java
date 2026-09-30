@@ -225,6 +225,10 @@ public class DemoDialogActivity extends Activity {
 
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             window.setWindowAnimations(0);
+
+            // Keep the local DSH overlay visible to the user but omit its Surface from
+            // screencap / screen recording so foreground capture sees the app underneath.
+            CaptureExclusion.markWindow(window);
         }
 
         initBaseUI();
