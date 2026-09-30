@@ -641,12 +641,12 @@ public class DemoDialogActivity extends Activity {
             view.evaluateJavascript(sb.toString(), null);
 
             // Normal mode keeps the original timing. Fast start waits for page completion,
-            // gives the injected SPA UI 200ms to settle, then fades the whole WebView in for 240ms.
+            // gives the injected SPA UI 100ms to settle, then fades the whole WebView in for 240ms.
             if (mWebView != null && mWebView.getAlpha() < 1f && !mStartupFadeScheduled) {
                 if (!enableFastStart || mPageFinished) {
                     mStartupFadeScheduled = true;
                     if (enableFastStart) {
-                        mWebView.postDelayed(mStartupFadeRunnable, 200L);
+                        mWebView.postDelayed(mStartupFadeRunnable, 100L);
                     } else {
                         mWebView.post(mStartupFadeRunnable);
                     }
