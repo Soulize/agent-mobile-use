@@ -1,0 +1,95 @@
+name: Build KernelSU package
+
+on:
+  push:
+    branches:
+      - exclude-overlay-capture
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ksu:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-23" "build-tools;28.0.3"
+
+      - name: Prepare legacy build paths and Xposed API
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sudo mkdir -p /usr/lib/android-sdk/platforms/android-23
+          sudo mkdir -p /usr/lib/android-sdk/build-tools/debian
+          sudo mkdir -p /root/xposed_lib
+
+          sudo ln -sf "$ANDROID_HOME/platforms/android-23/android.jar"             /usr/lib/android-sdk/platforms/android-23/android.jar
+
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/dx"             /usr/lib/android-sdk/build-tools/debian/dx
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/aapt" /usr/bin/aapt
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/zipalign" /usr/bin/zipalign
+          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/apksigner" /usr/bin/apksigner
+
+          curl -fL             https://api.xposed.info/repo/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
+          sudo cp /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
+
+      - name: Build hook APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x agent-hook-apk/build.sh
+          sudo -E bash agent-hook-apk/build.sh
+
+      - name: Build Java tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x vd-tool-java/build.sh
+          sudo -E bash vd-tool-java/build.sh
+
+      - name: Build ARM64 Android vd_server
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x vd-server-go/build.sh
+          GOOS=android GOARCH=arm64 bash vd-server-go/build.sh
+          file vd-server-go/vd_server
+
+      - name: Pack complete KernelSU module
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x ksu-module/pack.sh
+          bash ksu-module/pack.sh
+          unzip -l agent-mobile-use-ksu.zip
+          sha256sum agent-mobile-use-ksu.zip
+
+      - name: Upload KernelSU package
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-mobile-use-ksu-exclude-overlay-capture
+          path: agent-mobile-use-ksu.zip
+          if-no-files-found: error
+          retention-days: 14
