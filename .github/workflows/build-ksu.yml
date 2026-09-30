@@ -122,9 +122,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          chmod +x vd-server-go/build.sh
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 ./vd-server-go/build.sh
-          file vd-server-go/vd_server
+          cd vd-server-go
+          go test ./...
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o vd_server .
+          file vd_server
+          file vd_server | grep -q "ARM aarch64"
 
       - name: Build overlay APK
         shell: bash
