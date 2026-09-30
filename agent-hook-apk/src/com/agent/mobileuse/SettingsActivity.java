@@ -84,7 +84,7 @@ public class SettingsActivity extends Activity {
     // Tab 1 Views (DSH Core & Auth)
     private EditText mEtSecret;
     private Switch mSwitchTranslucentTheme;
-    private Switch mSwitchStartupAnimation;
+    private Switch mSwitchFastStart;
     private Switch mSwitchFloatingWhale;
     private Switch mSwitchKeyboardAssist;
 
@@ -154,13 +154,13 @@ public class SettingsActivity extends Activity {
         }
     };
 
-    private final CompoundButton.OnCheckedChangeListener mStartupAnimationChangeListener = new CompoundButton.OnCheckedChangeListener() {
+    private final CompoundButton.OnCheckedChangeListener mFastStartChangeListener = new CompoundButton.OnCheckedChangeListener() {
         @Override
         public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
             getSharedPreferences(PREFS_AUTH, Context.MODE_PRIVATE)
-                    .edit().putBoolean("enable_startup_animation", isChecked).commit();
+                    .edit().putBoolean("enable_fast_start", isChecked).commit();
             Toast.makeText(SettingsActivity.this,
-                    isChecked ? "控制台启动动画已开启" : "控制台启动动画已关闭",
+                    isChecked ? "快速启动已开启" : "快速启动已关闭",
                     Toast.LENGTH_SHORT).show();
         }
     };
@@ -575,10 +575,10 @@ public class SettingsActivity extends Activity {
         clientPrefsCard.addView(rowTranslucent);
         clientPrefsCard.addView(createCardDivider());
 
-        mSwitchStartupAnimation = new Switch(this);
-        LinearLayout rowStartupAnimation = createSwitchRow("启动光圈与淡入动画", mSwitchStartupAnimation);
-        mSwitchStartupAnimation.setOnCheckedChangeListener(mStartupAnimationChangeListener);
-        clientPrefsCard.addView(rowStartupAnimation);
+        mSwitchFastStart = new Switch(this);
+        LinearLayout rowFastStart = createSwitchRow("快速启动", mSwitchFastStart);
+        mSwitchFastStart.setOnCheckedChangeListener(mFastStartChangeListener);
+        clientPrefsCard.addView(rowFastStart);
         clientPrefsCard.addView(createCardDivider());
 
         mSwitchFloatingWhale = new Switch(this);
@@ -807,7 +807,7 @@ public class SettingsActivity extends Activity {
 
         SharedPreferences spAuth = getSharedPreferences(PREFS_AUTH, Context.MODE_PRIVATE);
         setSwitchCheckedSilently(mSwitchTranslucentTheme, spAuth.getBoolean("enable_translucent_theme", true), mTranslucentThemeChangeListener);
-        setSwitchCheckedSilently(mSwitchStartupAnimation, spAuth.getBoolean("enable_startup_animation", true), mStartupAnimationChangeListener);
+        setSwitchCheckedSilently(mSwitchFastStart, spAuth.getBoolean("enable_fast_start", false), mFastStartChangeListener);
         setSwitchCheckedSilently(mSwitchFloatingWhale, spAuth.getBoolean("enable_floating_whale", true), mFloatingWhaleChangeListener);
         setSwitchCheckedSilently(mSwitchKeyboardAssist, spAuth.getBoolean("enable_keyboard_assist", true), mKeyboardAssistChangeListener);
 
