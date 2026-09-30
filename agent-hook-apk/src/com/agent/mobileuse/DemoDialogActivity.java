@@ -225,10 +225,6 @@ public class DemoDialogActivity extends Activity {
 
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             window.setWindowAnimations(0);
-
-            // Keep the local DSH overlay visible to the user but omit its Surface from
-            // screencap / screen recording so foreground capture sees the app underneath.
-            CaptureExclusion.markWindow(window);
         }
 
         initBaseUI();
@@ -864,6 +860,22 @@ public class DemoDialogActivity extends Activity {
                 mFilePathCallback.onReceiveValue(results);
                 mFilePathCallback = null;
             }
+        }
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // The window must be attached before its SurfaceControl exists. Applying
+        // SKIP_SCREENSHOT here avoids privileged WindowManager private flags that
+        // would make an ordinary application window fail to open.
+        try {
+            Window window = getWindow();
+            if (window != null) {
+                CaptureExclusion.markView(window.getDecorView());
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Capture exclusion unavailable; continuing normally", t);
         }
     }
 
