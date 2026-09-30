@@ -1164,8 +1164,21 @@ public class ToolMain {
                     } else if ("key_targeted".equals(action)) {
                         if (tokens.length >= 3) {
                             int displayId = Integer.parseInt(tokens[1]);
-                            int keyCode = Integer.parseInt(tokens[2]);
-                            targetedKeyWithUi(uiAutomation, uiClass, displayId, keyCode);
+                            int keyCode;
+                            try {
+                                keyCode = Integer.parseInt(tokens[2]);
+                            } catch (NumberFormatException nfe) {
+                                String keyName = tokens[2].toUpperCase();
+                                if (!keyName.startsWith("KEYCODE_")) {
+                                    keyName = "KEYCODE_" + keyName;
+                                }
+                                keyCode = KeyEvent.keyCodeFromString(keyName);
+                            }
+                            if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {
+                                System.out.print("{\"ok\":false,\"error\":\"unknown_keycode\"}");
+                            } else {
+                                targetedKeyWithUi(uiAutomation, uiClass, displayId, keyCode);
+                            }
                         } else {
                             System.out.print("{\"ok\":false,\"error\":\"invalid_key_targeted\"}");
                         }
