@@ -1,3 +1,4 @@
+# CI build for the complete flashable KernelSU module
 name: Build KernelSU package
 
 on:
