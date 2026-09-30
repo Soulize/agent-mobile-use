@@ -12,6 +12,7 @@ fi
 
 echo "[modern-build] Building hook APK with Gradle/AGP..."
 "$GRADLE_CMD" :agent-hook-apk:packageHookApk
+cp -f agent-hook-apk/build/dist/agent_hook.apk agent-hook-apk/build/agent_hook.apk
 
 echo "[modern-build] Building Java device tools with D8..."
 chmod +x vd-tool-java/build-modern.sh
