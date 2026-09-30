@@ -17,9 +17,9 @@ android {
     sourceSets {
         getByName("main") {
             manifest.srcFile("src/main/AndroidManifest.xml")
-            java.setSrcDirs(listOf("src"))
-            res.setSrcDirs(listOf("res"))
-            assets.setSrcDirs(listOf("assets"))
+            java.directories += "src"
+            res.directories += "res"
+            assets.directories += "assets"
         }
     }
 
