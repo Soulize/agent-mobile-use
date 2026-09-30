@@ -453,7 +453,6 @@ public class GlowService extends Service {
             } catch (Throwable ignored) {}
 
             mWindowManager.addView(mGlowView, lp);
-            CaptureExclusion.markView(mGlowView);
             mGlowView.startPulseAnimation();
 
             registerTouchReceiver();
