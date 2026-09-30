@@ -40,6 +40,22 @@
     return origFocus.apply(this, arguments);
   };
 
+  // Read the Session selected by DSH's persisted navigation store.
+  var getCurrentSessionId = function () {
+    try {
+      var raw = localStorage.getItem("dsh.sessions.current");
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      return obj && typeof obj.sessionId === "string" && obj.sessionId ? obj.sessionId : null;
+    } catch (e) {}
+    return null;
+  };
+
+  // A reload-backed switch is used only for overlay sidebar navigation. The
+  // marker survives the WebView reload so the freshly restored conversation
+  // can collapse the full-screen mobile sidebar afterwards.
+  var SESSION_SWITCH_PENDING_KEY = "dsh.overlay.sessionSwitchPending";
+
   // Target session deep link & hot-switching support
   var getTargetSession = function () {
     try {
@@ -65,18 +81,41 @@
     } catch (e) {}
   }
 
-  // Global hot-switch interface for Android WebView bridge
+  // Global hot-switch interface for Android WebView bridge.
+  // DSH owns Session references in runtime state, so mutating localStorage
+  // alone is not enough to replace the mounted conversation. Persist the
+  // requested Session and reload once; DSH restores that selection during its
+  // normal bootstrap, which also hydrates the selected Session's history.
   window.DSH_SWITCH_SESSION = function (sessionId) {
-    if (!sessionId) return false;
+    if (typeof sessionId !== "string" || !sessionId) return false;
     try {
-      localStorage.setItem("dsh.sessions.current", JSON.stringify({ sessionId: sessionId }));
-      if (location.search.indexOf("session=") >= 0) {
-        location.search = location.search.replace(/session=[^&]+/, "session=" + sessionId);
-      } else {
-        location.search += (location.search ? "&" : "?") + "session=" + sessionId;
+      if (sessionId === getCurrentSessionId()) {
+        if (window.DSHOverlayBridge && window.DSHOverlayBridge.reportSession) {
+          window.DSHOverlayBridge.reportSession(sessionId);
+        }
+        return true;
       }
+
+      localStorage.setItem("dsh.sessions.current", JSON.stringify({ sessionId: sessionId }));
+      try {
+        sessionStorage.setItem(SESSION_SWITCH_PENDING_KEY, sessionId);
+      } catch (e) {}
+
       if (window.DSHOverlayBridge && window.DSHOverlayBridge.reportSession) {
         window.DSHOverlayBridge.reportSession(sessionId);
+      }
+
+      // Keep the target in the URL as a reload fallback. The pending-switch
+      // bootstrap below removes it with replaceState after DSH has restored it,
+      // so later unrelated reloads cannot jump back to a stale Session.
+      try {
+        var nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set("session", sessionId);
+        nextUrl.searchParams.delete("session_id");
+        nextUrl.searchParams.delete("s");
+        window.location.replace(nextUrl.toString());
+      } catch (urlError) {
+        window.location.reload();
       }
       return true;
     } catch (e) {
@@ -120,6 +159,89 @@
 
     var cfg = window.__DSH_MOBILE_CONFIG__ || {};
 
+    var sidebarToggleSelector = '[data-slot="sidebar-toggle"], [aria-label*="sidebar" i], [aria-label*="侧边栏"], button[class*="toggleSidebar"], button[class*="_toggle"]';
+
+    var collapseSidebarOnce = function () {
+      var frame = document.querySelector('[class*="_frame"]');
+      if (!frame) return false;
+      if (frame.hasAttribute("data-sidebar-collapsed")) return true;
+      var toggleBtn = document.querySelector(sidebarToggleSelector);
+      if (!toggleBtn) return false;
+      toggleBtn.click();
+      return true;
+    };
+
+    var collapseSidebarAfterSwitch = function (retries) {
+      if (collapseSidebarOnce()) {
+        switchToChat();
+        scrollChatToBottom();
+        return;
+      }
+      if (retries > 0) {
+        setTimeout(function () {
+          collapseSidebarAfterSwitch(retries - 1);
+        }, 80);
+      }
+    };
+
+    // A session switch initiated by the overlay reloads the WebView so DSH can
+    // restore its own Session reference. Finish that transition by returning to
+    // Conversation and collapsing the mobile sidebar. Remove the one-shot URL
+    // target so a future unrelated reload cannot resurrect an old Session.
+    try {
+      var pendingSessionSwitch = sessionStorage.getItem(SESSION_SWITCH_PENDING_KEY);
+      if (pendingSessionSwitch) {
+        sessionStorage.removeItem(SESSION_SWITCH_PENDING_KEY);
+        try {
+          var cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete("session");
+          cleanUrl.searchParams.delete("session_id");
+          cleanUrl.searchParams.delete("s");
+          window.history.replaceState(window.history.state, document.title, cleanUrl.toString());
+        } catch (e) {}
+        setTimeout(function () {
+          collapseSidebarAfterSwitch(8);
+        }, 80);
+      }
+    } catch (e) {}
+
+    // Session rows expose a stable data-row-key="session:<id>" in DSH.
+    // Take ownership only when tapping the row body for a *different* Session.
+    // This avoids the old race where the overlay collapsed the sidebar while
+    // DSH was still replacing the main Session reference, leaving the previous
+    // conversation mounted or an empty/new-session view on screen.
+    var onSessionRowClick = function (event) {
+      var target = event.target instanceof Element ? event.target : (event.target && event.target.parentElement);
+      if (!target || !target.closest) return;
+
+      var row = target.closest('[data-row-key^="session:"]');
+      if (!row) return;
+
+      // Preserve native row actions such as pin/archive/rename menus.
+      var interactive = target.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"]');
+      if (interactive && row.contains(interactive) && interactive !== row) return;
+
+      var rowKey = row.getAttribute("data-row-key") || "";
+      if (rowKey.indexOf("session:") !== 0) return;
+      var sessionId = rowKey.slice("session:".length);
+      if (!sessionId || sessionId === getCurrentSessionId()) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      try {
+        if (document.activeElement && typeof document.activeElement.blur === "function") {
+          document.activeElement.blur();
+        }
+        if (window.DSHOverlayBridge && typeof window.DSHOverlayBridge.hideSoftInput === "function") {
+          window.DSHOverlayBridge.hideSoftInput();
+        }
+      } catch (e) {}
+
+      window.DSH_SWITCH_SESSION(sessionId);
+    };
+    document.addEventListener("click", onSessionRowClick, true);
+
     // 1. Whale Button (Toggle Sidebar)
     var existingWhale = document.querySelector(".dsh-overlay-whale-btn");
     if (cfg.enableWhale === false) {
@@ -133,7 +255,7 @@
       whaleBtn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        var toggleBtn = document.querySelector('[data-slot="sidebar-toggle"], [aria-label*="sidebar" i], [aria-label*="侧边栏"], button[class*="toggleSidebar"], button[class*="_toggle"]');
+        var toggleBtn = document.querySelector(sidebarToggleSelector);
         if (toggleBtn) {
           toggleBtn.click();
         }
@@ -226,11 +348,7 @@
       );
       if (autoCollapseTarget) {
         setTimeout(function () {
-          var currentFrame = document.querySelector('[class*="_frame"]');
-          if (currentFrame && !currentFrame.hasAttribute("data-sidebar-collapsed")) {
-            var toggleBtn = document.querySelector('[data-slot="sidebar-toggle"], [aria-label*="sidebar" i], [aria-label*="侧边栏"], button[class*="toggleSidebar"], button[class*="_toggle"]');
-            if (toggleBtn) toggleBtn.click();
-          }
+          collapseSidebarOnce();
         }, 80);
       }
     };
