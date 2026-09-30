@@ -55,8 +55,123 @@ public class HookEntry implements IXposedHookLoadPackage {
         // Isolate InputMethodManagerService (IME) to prevent soft keyboard popup on Display 0
         hookImmsDisplayIsolation(cl);
 
+        // Screenshot exclusion must be applied from system_server. Doing this from the
+        // ordinary app process is blocked by hidden-API / WindowManager privilege checks.
+        hookAgentScreenshotExclusion(cl);
+
         // Intercept Action Button on OnePlus 13 (ColorOS) to launch DemoDialogActivity
         hookActionButton(cl);
+    }
+
+    private static Object getFieldRecursive(Object obj, String fieldName) {
+        if (obj == null) return null;
+        Class<?> cur = obj.getClass();
+        while (cur != null) {
+            try {
+                java.lang.reflect.Field f = cur.getDeclaredField(fieldName);
+                f.setAccessible(true);
+                return f.get(obj);
+            } catch (NoSuchFieldException e) {
+                cur = cur.getSuperclass();
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isAgentWindowState(Object win) {
+        if (win == null) return false;
+        try {
+            Object attrsObj = getFieldRecursive(win, "mAttrs");
+            if (attrsObj instanceof android.view.WindowManager.LayoutParams) {
+                android.view.WindowManager.LayoutParams attrs =
+                        (android.view.WindowManager.LayoutParams) attrsObj;
+                if ("com.agent.mobileuse".equals(attrs.packageName)) return true;
+                CharSequence title = attrs.getTitle();
+                if (title != null) {
+                    String s = title.toString();
+                    if (s.contains("com.agent.mobileuse") || "AgentMobileEdgeGlow".equals(s)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Object pkg = invokeNoArg(win, "getOwningPackage");
+            if (pkg != null && "com.agent.mobileuse".equals(pkg.toString())) return true;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private static Object extractSurfaceControl(Object result, Object animator) {
+        try {
+            Class<?> scClass = Class.forName("android.view.SurfaceControl");
+            if (result != null && scClass.isInstance(result)) return result;
+
+            Object sc = getFieldRecursive(result, "mSurfaceControl");
+            if (sc != null && scClass.isInstance(sc)) return sc;
+
+            sc = getFieldRecursive(animator, "mSurfaceControl");
+            if (sc != null && scClass.isInstance(sc)) return sc;
+
+            Object controller = getFieldRecursive(animator, "mSurfaceController");
+            sc = getFieldRecursive(controller, "mSurfaceControl");
+            if (sc != null && scClass.isInstance(sc)) return sc;
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static void markSkipScreenshotFromSystemServer(Object surfaceControl) throws Throwable {
+        if (surfaceControl == null) return;
+        Class<?> scClass = Class.forName("android.view.SurfaceControl");
+        Class<?> txClass = Class.forName("android.view.SurfaceControl$Transaction");
+        Object tx = txClass.getConstructor().newInstance();
+
+        java.lang.reflect.Method setSkip;
+        try {
+            setSkip = txClass.getMethod("setSkipScreenshot", scClass, boolean.class);
+        } catch (NoSuchMethodException e) {
+            setSkip = txClass.getDeclaredMethod("setSkipScreenshot", scClass, boolean.class);
+            setSkip.setAccessible(true);
+        }
+        setSkip.invoke(tx, surfaceControl, true);
+        txClass.getMethod("apply").invoke(tx);
+        try {
+            txClass.getMethod("close").invoke(tx);
+        } catch (Throwable ignored) {}
+    }
+
+    private void hookAgentScreenshotExclusion(ClassLoader cl) {
+        try {
+            Class<?> animatorClass = XposedHelpers.findClass(
+                    "com.android.server.wm.WindowStateAnimator", cl);
+            XposedBridge.hookAllMethods(animatorClass, "createSurfaceLocked",
+                    new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    Object win = getFieldRecursive(param.thisObject, "mWin");
+                    if (!isAgentWindowState(win)) return;
+
+                    Object sc = extractSurfaceControl(param.getResult(), param.thisObject);
+                    if (sc == null) {
+                        XposedBridge.log("[AgentMobileUseHook] Agent window surface created but SurfaceControl was not found");
+                        return;
+                    }
+
+                    try {
+                        markSkipScreenshotFromSystemServer(sc);
+                        XposedBridge.log("[AgentMobileUseHook] SKIP_SCREENSHOT applied to agent overlay surface");
+                    } catch (Throwable t) {
+                        XposedBridge.log("[AgentMobileUseHook] Failed to apply SKIP_SCREENSHOT: " + t);
+                    }
+                }
+            });
+            XposedBridge.log("[AgentMobileUseHook] WindowStateAnimator screenshot exclusion hook installed");
+        } catch (Throwable t) {
+            XposedBridge.log("[AgentMobileUseHook] Failed to hook screenshot exclusion: " + t);
+        }
     }
 
     private void hookAllMethodsReturningTrue(ClassLoader cl, String className, String methodName) {
