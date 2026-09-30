@@ -6,6 +6,7 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.InputDevice;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
@@ -623,6 +624,28 @@ public class ToolMain {
     private static final Map<String, Integer> sPackageUidCache =
             new HashMap<String, Integer>();
 
+    // Foreground-agent routing context. Touch injection records the app that actually
+    // received the gesture, and the last tap point is reused by type(focused) when the
+    // DSH Activity owns global window focus and Android therefore clears the app's
+    // AccessibilityNodeInfo#isFocused signal.
+    private static volatile String sLastAgentTargetPackage = null;
+    private static volatile int sLastAgentTargetUid = -1;
+    private static volatile int sLastAgentTargetDisplayId = -1;
+    private static volatile int sLastAgentTouchX = -1;
+    private static volatile int sLastAgentTouchY = -1;
+
+    private static void rememberAgentTarget(TargetInputWindow target, int displayId,
+                                            int x, int y, boolean rememberPoint) {
+        if (target == null) return;
+        sLastAgentTargetPackage = target.packageName;
+        sLastAgentTargetUid = target.uid;
+        sLastAgentTargetDisplayId = displayId;
+        if (rememberPoint) {
+            sLastAgentTouchX = x;
+            sLastAgentTouchY = y;
+        }
+    }
+
     private static int resolvePackageUid(String packageName) {
         if (packageName == null || packageName.isEmpty()) return -1;
         Integer cached = sPackageUidCache.get(packageName);
@@ -727,6 +750,132 @@ public class ToolMain {
         return best;
     }
 
+    /**
+     * Resolve the highest ordinary application accessibility window on a display.
+     * When focusedOnly=true this is also the readiness probe used after the DSH
+     * window temporarily relinquishes keyboard focus for a raw key event.
+     */
+    private static TargetInputWindow resolveUnderlyingInputWindow(Object uiAutomation,
+                                                                  Class<?> uiClass,
+                                                                  int displayId,
+                                                                  boolean focusedOnly) {
+        TargetInputWindow best = null;
+        try {
+            Object displays = uiClass.getMethod("getWindowsOnAllDisplays").invoke(uiAutomation);
+            if (displays == null) return null;
+
+            Class<?> saClass = displays.getClass();
+            int n = (Integer) saClass.getMethod("size").invoke(displays);
+            Method keyAt = saClass.getMethod("keyAt", int.class);
+            Method valueAt = saClass.getMethod("valueAt", int.class);
+
+            for (int i = 0; i < n; i++) {
+                int dId = (Integer) keyAt.invoke(displays, i);
+                if (dId != displayId) continue;
+                List<?> wins = (List<?>) valueAt.invoke(displays, i);
+                if (wins == null) continue;
+
+                for (Object win : wins) {
+                    AccessibilityNodeInfo root = null;
+                    try {
+                        Object rootObj = win.getClass().getMethod("getRoot").invoke(win);
+                        if (rootObj instanceof AccessibilityNodeInfo) {
+                            root = (AccessibilityNodeInfo) rootObj;
+                        }
+                    } catch (Throwable ignored) {}
+
+                    if (isAgentOverlayWindow(win, root)) continue;
+                    if (isSystemWindow(win, root)) continue;
+                    if (root == null) continue;
+
+                    boolean focused = false;
+                    try {
+                        if (win instanceof AccessibilityWindowInfo) {
+                            focused = ((AccessibilityWindowInfo) win).isFocused();
+                        } else {
+                            Object fv = win.getClass().getMethod("isFocused").invoke(win);
+                            focused = fv instanceof Boolean && ((Boolean) fv).booleanValue();
+                        }
+                    } catch (Throwable ignored) {}
+                    if (focusedOnly && !focused) continue;
+
+                    CharSequence pkgCs = null;
+                    try { pkgCs = root.getPackageName(); } catch (Throwable ignored) {}
+                    if (pkgCs == null) continue;
+                    String pkg = pkgCs.toString();
+                    if (pkg.isEmpty() || AGENT_OVERLAY_PACKAGE.equals(pkg)) continue;
+
+                    int layer = 0;
+                    try {
+                        if (win instanceof AccessibilityWindowInfo) {
+                            layer = ((AccessibilityWindowInfo) win).getLayer();
+                        } else {
+                            Object lv = win.getClass().getMethod("getLayer").invoke(win);
+                            if (lv instanceof Integer) layer = ((Integer) lv).intValue();
+                        }
+                    } catch (Throwable ignored) {}
+
+                    int uid = resolvePackageUid(pkg);
+                    if (uid < 0) continue;
+
+                    if (best == null || layer > best.layer) {
+                        best = new TargetInputWindow(pkg, uid, layer);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return best;
+    }
+
+    private static AccessibilityNodeInfo findEditableForLastAgentTap(
+            List<AccessibilityNodeInfo> nodes, int displayId) {
+        if (nodes == null || nodes.isEmpty()) return null;
+        if (sLastAgentTargetDisplayId != displayId || sLastAgentTargetPackage == null) {
+            return null;
+        }
+
+        AccessibilityNodeInfo bestAtPoint = null;
+        long bestArea = Long.MAX_VALUE;
+        if (sLastAgentTouchX >= 0 && sLastAgentTouchY >= 0) {
+            for (AccessibilityNodeInfo node : nodes) {
+                if (node == null || !node.isEditable()) continue;
+                CharSequence pkg = null;
+                try { pkg = node.getPackageName(); } catch (Throwable ignored) {}
+                if (pkg == null || !sLastAgentTargetPackage.equals(pkg.toString())) continue;
+
+                Rect r = new Rect();
+                try { node.getBoundsInScreen(r); } catch (Throwable ignored) {}
+                if (!r.contains(sLastAgentTouchX, sLastAgentTouchY)) continue;
+
+                long area = Math.max(1L, (long) r.width() * (long) r.height());
+                if (bestAtPoint == null || area < bestArea) {
+                    bestAtPoint = node;
+                    bestArea = area;
+                }
+            }
+        }
+        if (bestAtPoint != null) return bestAtPoint;
+
+        // If the tap landed on a wrapper around an EditText, bounds may not contain the
+        // precise touch point. A single visible editable in the same app is still
+        // unambiguous; multiple candidates are deliberately rejected rather than guessed.
+        AccessibilityNodeInfo unique = null;
+        int count = 0;
+        for (AccessibilityNodeInfo node : nodes) {
+            if (node == null || !node.isEditable()) continue;
+            CharSequence pkg = null;
+            try { pkg = node.getPackageName(); } catch (Throwable ignored) {}
+            if (pkg == null || !sLastAgentTargetPackage.equals(pkg.toString())) continue;
+            boolean visible = true;
+            try { visible = node.isVisibleToUser(); } catch (Throwable ignored) {}
+            if (!visible) continue;
+            unique = node;
+            count++;
+            if (count > 1) return null;
+        }
+        return unique;
+    }
+
     private static void setInputEventDisplayId(Object event, int displayId) {
         if (event == null) return;
         try {
@@ -806,6 +955,7 @@ public class ToolMain {
                 return;
             }
 
+            rememberAgentTarget(target, displayId, x, y, true);
             System.out.print("{\"ok\":true,\"package\":\"" + target.packageName
                     + "\",\"uid\":" + target.uid + "}");
         } catch (Throwable t) {
@@ -870,6 +1020,7 @@ public class ToolMain {
                 return;
             }
 
+            rememberAgentTarget(target, displayId, x1, y1, false);
             System.out.print("{\"ok\":true,\"package\":\"" + target.packageName
                     + "\",\"uid\":" + target.uid + "}");
         } catch (Throwable t) {
@@ -877,6 +1028,54 @@ public class ToolMain {
                     + oneLine(t.getClass().getSimpleName() + ": " + t.getMessage()) + "\"}");
         } finally {
             try { if (ev != null) ev.recycle(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void targetedKeyWithUi(Object uiAutomation, Class<?> uiClass,
+                                          int displayId, int keyCode) {
+        TargetInputWindow target = null;
+
+        // The Go side has already made DemoDialogActivity NOT_FOCUSABLE. Poll the
+        // accessibility window list instead of sleeping a fixed amount: on a fast device
+        // this usually resolves immediately, while slow WMS focus transitions get up to 600ms.
+        for (int i = 0; i < 24; i++) {
+            clearAicCache();
+            target = resolveUnderlyingInputWindow(uiAutomation, uiClass, displayId, true);
+            if (target != null) break;
+            try { Thread.sleep(25); } catch (InterruptedException ignored) {}
+        }
+
+        if (target == null) {
+            System.out.print("{\"ok\":false,\"error\":\"underlying_window_not_focused\"}");
+            return;
+        }
+
+        long downTime = SystemClock.uptimeMillis();
+        KeyEvent down = null;
+        KeyEvent up = null;
+        try {
+            down = new KeyEvent(downTime, SystemClock.uptimeMillis(),
+                    KeyEvent.ACTION_DOWN, keyCode, 0);
+            setInputEventDisplayId(down, displayId);
+            if (!injectInputEventToUid(down, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_key_down_failed\"}");
+                return;
+            }
+
+            up = new KeyEvent(downTime, SystemClock.uptimeMillis(),
+                    KeyEvent.ACTION_UP, keyCode, 0);
+            setInputEventDisplayId(up, displayId);
+            if (!injectInputEventToUid(up, target.uid)) {
+                System.out.print("{\"ok\":false,\"error\":\"targeted_key_up_failed\"}");
+                return;
+            }
+
+            rememberAgentTarget(target, displayId, -1, -1, false);
+            System.out.print("{\"ok\":true,\"package\":\"" + target.packageName
+                    + "\",\"uid\":" + target.uid + "}");
+        } catch (Throwable t) {
+            System.out.print("{\"ok\":false,\"error\":\""
+                    + oneLine(t.getClass().getSimpleName() + ": " + t.getMessage()) + "\"}");
         }
     }
 
@@ -961,6 +1160,14 @@ public class ToolMain {
                                     x1, y1, x2, y2, durationMs);
                         } else {
                             System.out.print("{\"ok\":false,\"error\":\"invalid_swipe_targeted\"}");
+                        }
+                    } else if ("key_targeted".equals(action)) {
+                        if (tokens.length >= 3) {
+                            int displayId = Integer.parseInt(tokens[1]);
+                            int keyCode = Integer.parseInt(tokens[2]);
+                            targetedKeyWithUi(uiAutomation, uiClass, displayId, keyCode);
+                        } else {
+                            System.out.print("{\"ok\":false,\"error\":\"invalid_key_targeted\"}");
                         }
                     } else if ("type".equals(action) || "type_b64".equals(action)) {
                         if (tokens.length >= 3) {
@@ -2276,6 +2483,14 @@ public class ToolMain {
                 if (targetNode == null && focusedAny != null) {
                     targetNode = findFirstEditable(focusedAny);
                 }
+
+                if (targetNode == null && targetDisplayId == 0) {
+                    targetNode = findEditableForLastAgentTap(all, targetDisplayId);
+                    if (targetNode != null) {
+                        focusHint = "agent_last_tap";
+                    }
+                }
+
                 if (targetNode == null) {
                     error = "no_focused_input";
                     if (focusedAny == null) {
@@ -2285,7 +2500,7 @@ public class ToolMain {
                                 ? simplifyType(focusedAny.getClassName().toString()) : "View";
                         focusHint = fc + "@" + rectStr(focusedAny);
                     }
-                    reason = "No input field is currently focused. Please click the field first to focus, then type without target.";
+                    reason = "No bottom-app editable could be resolved from real view focus or the Agent's last targeted tap. Click the desired field first, or pass its node id explicitly.";
                 }
             } else {
                 // Numeric Node ID Mode: targetSpec must be a numeric node ID from dump tree (e.g. '146' or 'node:146')
@@ -2348,6 +2563,18 @@ public class ToolMain {
                 if (!setOk) {
                     error = "inject_rejected";
                 } else {
+                    try {
+                        CharSequence pkgCs = targetNode.getPackageName();
+                        if (pkgCs != null) {
+                            String pkg = pkgCs.toString();
+                            int uid = resolvePackageUid(pkg);
+                            if (uid >= 0) {
+                                TargetInputWindow typedTarget =
+                                        new TargetInputWindow(pkg, uid, Integer.MAX_VALUE);
+                                rememberAgentTarget(typedTarget, targetDisplayId, -1, -1, false);
+                            }
+                        }
+                    } catch (Throwable ignored) {}
                     mode = "action_set_text";
                     Thread.sleep(60);
                     boolean fresh = true;
