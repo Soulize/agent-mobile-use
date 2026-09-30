@@ -567,6 +567,61 @@ func startCapsuleWatchdog() {
 	}()
 }
 
+var overlayPassthroughMu sync.Mutex
+
+func setOverlayPassthrough(enabled bool) bool {
+	if getCurrentMode() != "foreground" {
+		return false
+	}
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	cmd := exec.Command(
+		"/system/bin/am", "broadcast", "--user", "0",
+		"-n", "com.agent.mobileuse/.OverlayControlReceiver",
+		"-a", "com.agent.mobileuse.ACTION_AGENT_PASSTHROUGH",
+		"--ez", "enabled", value,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[overlay-passthrough] enabled=%v failed: %v (%s)",
+			enabled, err, strings.TrimSpace(string(out)))
+		return false
+	}
+	return true
+}
+
+// beginOverlayPassthrough keeps the DSH surface rendered, but briefly removes
+// focus/touch ownership from its Activity window so accessibility and injected
+// input can reach the foreground app underneath. The returned release function
+// is idempotent, which lets callers defer it for errors and also release early
+// before a post-action observation.
+func beginOverlayPassthrough(targetDid int) func() {
+	if targetDid != 0 || getCurrentMode() != "foreground" {
+		return func() {}
+	}
+
+	overlayPassthroughMu.Lock()
+	enabled := setOverlayPassthrough(true)
+	if enabled {
+		// Wait for WindowManager + AccessibilityWindowsPopulator to publish the
+		// updated touchable/focusable regions. No surface is hidden, so this does
+		// not create a visible flash.
+		time.Sleep(120 * time.Millisecond)
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if enabled {
+				_ = setOverlayPassthrough(false)
+			}
+			overlayPassthroughMu.Unlock()
+		})
+	}
+}
+
 func broadcastTouch(touchType int, x, y, x1, y1, x2, y2, duration int) {
 	if getCurrentMode() != "foreground" {
 		return
@@ -1592,6 +1647,9 @@ func isTransientTorn(treeText string, targetDid int, dispW int) bool {
 }
 
 func captureUiDumpWithRetry(targetDid int, st StatusResp, noSystemUi bool, maxRetries int, delayMs int) (string, string, error) {
+	releaseOverlay := beginOverlayPassthrough(targetDid)
+	defer releaseOverlay()
+
 	var lastStatus, lastText string
 	var lastErr error
 	dispW, _ := displaySize(targetDid, st)
@@ -1950,6 +2008,9 @@ func main() {
 			json.NewEncoder(w).Encode(ActionResponse{Success: true, Message: statusStr, Data: textStr})
 
 		case "click":
+			releaseOverlay := beginOverlayPassthrough(targetDid)
+			defer releaseOverlay()
+
 			var x, y int
 			var targetDesc string
 			hasCoord := len(p.Coordinate) >= 2
@@ -1991,6 +2052,8 @@ func main() {
 				actionDesc = fmt.Sprintf("OK: Long-pressed %s(%d, %d) for %dms", targetDesc, x, y, p.DurationMs)
 			}
 
+			releaseOverlay()
+
 			// Restore physical transition buffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
 			_, textStr, err := captureUiDumpWithRetry(targetDid, st, p.NoSystemUI, 2, 200)
@@ -2001,6 +2064,9 @@ func main() {
 			json.NewEncoder(w).Encode(ActionResponse{Success: true, Message: actionDesc, Data: textStr})
 
 		case "type":
+			releaseOverlay := beginOverlayPassthrough(targetDid)
+			defer releaseOverlay()
+
 			targetSpec := "focused"
 			if targetStr != "" {
 				targetSpec = targetStr
@@ -2036,6 +2102,8 @@ func main() {
 				actionDesc += fmt.Sprintf(" | after=\"%s\"", tp.VerifiedText)
 			}
 
+			releaseOverlay()
+
 			// Restore text input settling buffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
 			_, textStr, err := captureUiDumpWithRetry(targetDid, st, p.NoSystemUI, 2, 200)
@@ -2046,6 +2114,9 @@ func main() {
 			json.NewEncoder(w).Encode(ActionResponse{Success: true, Message: actionDesc, Data: textStr})
 
 		case "swipe":
+			releaseOverlay := beginOverlayPassthrough(targetDid)
+			defer releaseOverlay()
+
 			if len(p.Coordinate) < 2 || len(p.EndCoordinate) < 2 {
 				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: "Action 'swipe' requires both start 'coordinate' [x1, y1] and 'end_coordinate' [x2, y2]"})
 				return
@@ -2058,6 +2129,8 @@ func main() {
 			}
 			exec.Command("/system/bin/input", "-d", did, "swipe",
 				strconv.Itoa(x1), strconv.Itoa(y1), strconv.Itoa(x2), strconv.Itoa(y2), strconv.Itoa(dur)).Run()
+
+			releaseOverlay()
 
 			// Restore inertia settling buffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
@@ -2073,6 +2146,9 @@ func main() {
 			})
 
 		case "key":
+			releaseOverlay := beginOverlayPassthrough(targetDid)
+			defer releaseOverlay()
+
 			keyName := p.Key
 			if keyName == "" {
 				keyName = p.Text
@@ -2083,6 +2159,8 @@ func main() {
 			}
 			kc := parseKeycode(keyName)
 			exec.Command("/system/bin/input", "-d", did, "keyevent", kc).Run()
+
+			releaseOverlay()
 
 			// Restore keybuffer (350ms) + 2x 200ms backoff retry
 			time.Sleep(350 * time.Millisecond)
@@ -2167,7 +2245,8 @@ func main() {
 			json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: err.Error()})
 			return
 		}
-		statusStr, textStr, err := performDumpInternal(targetDid, st, r.URL.Query().Get("no_system_ui") == "1")
+		statusStr, textStr, err := captureUiDumpWithRetry(
+			targetDid, st, r.URL.Query().Get("no_system_ui") == "1", 0, 0)
 		if err != nil {
 			json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: err.Error()})
 			return
