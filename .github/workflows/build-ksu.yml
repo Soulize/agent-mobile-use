@@ -33,6 +33,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y android-sdk android-sdk-build-tools aapt apksigner zipalign zip
+          if [ ! -f /usr/lib/android-sdk/platforms/android-23/android.jar ]; then
+            SDK_JAR="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" -name android.jar 2>/dev/null | sort -V | tail -n 1)"
+            test -n "$SDK_JAR"
+            sudo mkdir -p /usr/lib/android-sdk/platforms/android-23
+            sudo ln -sf "$SDK_JAR" /usr/lib/android-sdk/platforms/android-23/android.jar
+          fi
+          test -f /usr/lib/android-sdk/platforms/android-23/android.jar
+          test -x /usr/lib/android-sdk/build-tools/debian/dx
+          command -v aapt
+          command -v apksigner
+          command -v zipalign
 
       - name: Prepare Xposed compile stubs
         shell: bash
@@ -42,7 +53,6 @@ jobs:
           rm -rf "$STUB"
           mkdir -p "$STUB/src/de/robv/android/xposed/callbacks" "$STUB/classes"
           sudo mkdir -p /root/xposed_lib
-          sudo chown -R "$USER":"$USER" /root/xposed_lib
 
           cat > "$STUB/src/de/robv/android/xposed/IXposedHookLoadPackage.java" <<'EOF'
           package de.robv.android.xposed;
@@ -103,8 +113,9 @@ jobs:
           EOF
 
           javac -source 8 -target 8 -d "$STUB/classes" $(find "$STUB/src" -name '*.java')
-          jar cf /root/xposed_lib/xposed-api-stub.jar -C "$STUB/classes" .
-          ls -lh /root/xposed_lib/xposed-api-stub.jar
+          jar cf /tmp/xposed-api-stub.jar -C "$STUB/classes" .
+          sudo install -m 0644 /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
+          sudo ls -lh /root/xposed_lib/xposed-api-stub.jar
 
       - name: Build Java device tools
         shell: bash
