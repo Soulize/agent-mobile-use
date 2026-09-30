@@ -66,7 +66,7 @@ jobs:
           sha256sum release/agent-mobile-use-ksu-v0.8.0-alpha.zip
 
       - name: Upload KernelSU package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-mobile-use-ksu-modern-build
           path: release/agent-mobile-use-ksu-v0.8.0-alpha.zip
