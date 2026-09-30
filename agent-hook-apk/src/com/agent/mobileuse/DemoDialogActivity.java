@@ -261,6 +261,7 @@ public class DemoDialogActivity extends Activity {
         // 1. Root backdrop
         SharedPreferences sp = getSharedPreferences("agent_auth_prefs", Context.MODE_PRIVATE);
         boolean isTranslucent = sp.getBoolean("enable_translucent_theme", true);
+        boolean enableStartupAnimation = sp.getBoolean("enable_startup_animation", true);
         int winBg = isTranslucent ? Color.TRANSPARENT : Color.parseColor("#151517");
 
         mRootLayout = new FrameLayout(this);
@@ -330,7 +331,7 @@ public class DemoDialogActivity extends Activity {
         );
         mWebView.setLayoutParams(webLp);
         mWebView.setBackgroundColor(winBg);
-        mWebView.setAlpha(0f); // Hidden initially to eliminate flash, smoothly faded in after overlay injection
+        mWebView.setAlpha(enableStartupAnimation ? 0f : 1f); // Optional startup fade; disabled mode renders immediately
 
         setupWebViewSettings();
         mCard.addView(mWebView);
@@ -560,6 +561,7 @@ public class DemoDialogActivity extends Activity {
         try {
             SharedPreferences sp = getSharedPreferences("agent_auth_prefs", Context.MODE_PRIVATE);
             boolean enableTranslucent = sp.getBoolean("enable_translucent_theme", true);
+            boolean enableStartupAnimation = sp.getBoolean("enable_startup_animation", true);
             boolean enableWhale = sp.getBoolean("enable_floating_whale", true);
             boolean enableKbAssist = sp.getBoolean("enable_keyboard_assist", true);
 
@@ -574,11 +576,17 @@ public class DemoDialogActivity extends Activity {
             sb.append("  try {");
             sb.append("    window.__DSH_MOBILE_CONFIG__ = {");
             sb.append("      enableTranslucent: ").append(enableTranslucent).append(",");
+            sb.append("      enableStartupAnimation: ").append(enableStartupAnimation).append(",");
             sb.append("      enableWhale: ").append(enableWhale).append(",");
             sb.append("      enableKeyboardAssist: ").append(enableKbAssist);
             sb.append("    };");
             if (enableTranslucent) {
                 sb.append("    document.documentElement.setAttribute('data-dsh-overlay', 'true');");
+                if (enableStartupAnimation) {
+                    sb.append("    document.documentElement.removeAttribute('data-dsh-no-startup-animation');");
+                } else {
+                    sb.append("    document.documentElement.setAttribute('data-dsh-no-startup-animation', 'true');");
+                }
                 sb.append("    window.__DSH_OVERLAY__ = true;");
                 if (!cssBase64.isEmpty()) {
                     sb.append("    if (!document.getElementById('dsh-overlay-injected-style')) {");
@@ -590,6 +598,7 @@ public class DemoDialogActivity extends Activity {
                 }
             } else {
                 sb.append("    document.documentElement.removeAttribute('data-dsh-overlay');");
+                sb.append("    document.documentElement.removeAttribute('data-dsh-no-startup-animation');");
                 sb.append("    window.__DSH_OVERLAY__ = false;");
                 sb.append("    var st = document.getElementById('dsh-overlay-injected-style'); if (st) st.remove();");
                 sb.append("    var eb = document.getElementById('dsh-early-boot-hide'); if (eb) eb.remove();");
@@ -610,20 +619,25 @@ public class DemoDialogActivity extends Activity {
 
             view.evaluateJavascript(sb.toString(), null);
 
-            // Smooth fade-in once styles and controls are injected
+            // Smooth fade-in once styles and controls are injected, unless startup animation is disabled.
             if (mWebView != null && mWebView.getAlpha() < 1f) {
-                mWebView.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (mWebView != null && mWebView.getAlpha() < 1f) {
-                            mWebView.animate()
-                                    .alpha(1f)
-                                    .setDuration(240)
-                                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                                    .start();
+                if (enableStartupAnimation) {
+                    mWebView.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (mWebView != null && mWebView.getAlpha() < 1f) {
+                                mWebView.animate()
+                                        .alpha(1f)
+                                        .setDuration(240)
+                                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                        .start();
+                            }
                         }
-                    }
-                });
+                    });
+                } else {
+                    mWebView.animate().cancel();
+                    mWebView.setAlpha(1f);
+                }
             }
         } catch (Throwable t) {
             Log.e(TAG, "injectMobileOverlay error: " + t.getMessage(), t);
