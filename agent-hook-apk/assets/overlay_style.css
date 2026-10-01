@@ -19,6 +19,17 @@ html[data-dsh-overlay="true"]::before {
   animation: dsh-edge-breathe-once 1.4s cubic-bezier(0.4, 0, 0.2, 1) 1 forwards !important;
 }
 
+/* Fast start keeps the WebView hidden until the SPA has settled.
+   Hold the startup edge glow until the native 240ms fade actually begins. */
+html[data-dsh-overlay="true"][data-dsh-fast-start="true"]::before {
+  animation: none !important;
+  visibility: hidden !important;
+}
+html[data-dsh-overlay="true"][data-dsh-fast-start="true"][data-dsh-edge-glow="true"]::before {
+  visibility: visible !important;
+  animation: dsh-edge-breathe-once 1.4s cubic-bezier(0.4, 0, 0.2, 1) 1 forwards !important;
+}
+
 
 html[data-dsh-overlay="true"] [class*="_boot"] {
   background: transparent !important;
