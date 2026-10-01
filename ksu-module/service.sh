@@ -13,6 +13,15 @@ sleep 3
 rm -f /data/local/tmp/vd_status.json 2>/dev/null
 rm -f /data/local/tmp/vd_stop 2>/dev/null
 
+# Repair the special overlay app-op on every boot. This is required by
+# GlowService's TYPE_APPLICATION_OVERLAY edge frame in foreground takeover mode
+# and may be reset by APK reinstall/signature changes on ColorOS.
+if pm path com.agent.mobileuse >/dev/null 2>&1; then
+    appops set com.agent.mobileuse SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 \
+        || cmd appops set com.agent.mobileuse SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 \
+        || true
+fi
+
 # Ensure permissions and temp runtime files exist
 chmod 755 "$MODDIR/bin/vd_server" 2>/dev/null
 chmod 755 "$MODDIR/bin/run_daemon.sh" 2>/dev/null
