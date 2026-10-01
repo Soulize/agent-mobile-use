@@ -189,26 +189,42 @@
     if (cfg.focusInputOnLaunch === true) {
       var focusInputAttempts = 0;
       var focusComposerOnLaunch = function () {
-        var input = document.querySelector(
-          '[data-composer-input] textarea, [data-composer-input] [contenteditable="true"], ' +
-          '[data-composer-input], [data-lexical-editor="true"], ' +
-          '[data-slot="conversation.composer"] textarea, [data-slot="conversation.composer"] [contenteditable="true"], ' +
-          'textarea[placeholder], [contenteditable="true"][role="textbox"]'
-        );
+        // DSH's real editor surface is the contenteditable composer. Do not
+        // accept the transient/locked composer node during startup.
+        var input = document.querySelector('[data-composer-input][contenteditable="true"]');
         if (input) {
-          userTouchingInputRecently = true;
-          if (userTouchingInputTimer) clearTimeout(userTouchingInputTimer);
-          try { input.focus({ preventScroll: true }); } catch (e) { try { input.focus(); } catch (ignored) {} }
-          userTouchingInputTimer = setTimeout(function () { userTouchingInputRecently = false; }, 500);
           try {
-            if (window.DSHOverlayBridge && typeof window.DSHOverlayBridge.showSoftInput === "function") {
-              window.DSHOverlayBridge.showSoftInput();
-            }
-          } catch (e) {}
-          scrollChatToBottom();
-          return;
+            // Bypass the overlay's normal anti-autofocus guard for this one
+            // explicit launch request.
+            origFocus.call(input, { preventScroll: true });
+          } catch (e) {
+            try { origFocus.call(input); } catch (ignored) {}
+          }
+
+          // Only show the IME after the editable surface truly owns DOM focus.
+          if (document.activeElement === input) {
+            try {
+              var selection = window.getSelection && window.getSelection();
+              if (selection) {
+                var range = document.createRange();
+                range.selectNodeContents(input);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+              }
+            } catch (e) {}
+
+            try {
+              if (window.DSHOverlayBridge && typeof window.DSHOverlayBridge.showSoftInput === "function") {
+                window.DSHOverlayBridge.showSoftInput();
+              }
+            } catch (e) {}
+            scrollChatToBottom();
+            return;
+          }
         }
-        if (focusInputAttempts++ < 30) setTimeout(focusComposerOnLaunch, 100);
+
+        if (focusInputAttempts++ < 40) setTimeout(focusComposerOnLaunch, 100);
       };
       setTimeout(focusComposerOnLaunch, 100);
     }
