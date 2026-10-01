@@ -205,6 +205,16 @@ public class DemoDialogActivity extends Activity {
         public void run() {
             mStartupFadeScheduled = false;
             if (mWebView != null && mWebView.getAlpha() < 1f) {
+                // The fast-start WebView was hidden while CSS loaded, so start the
+                // one-shot edge glow now, at the same moment the native fade begins.
+                mWebView.evaluateJavascript(
+                        "try{" +
+                        "var de=document.documentElement;" +
+                        "de.removeAttribute('data-dsh-edge-glow');" +
+                        "void de.offsetWidth;" +
+                        "de.setAttribute('data-dsh-edge-glow','true');" +
+                        "}catch(e){}",
+                        null);
                 mWebView.animate()
                         .alpha(1f)
                         .setDuration(240)
@@ -659,8 +669,10 @@ public class DemoDialogActivity extends Activity {
                 sb.append("    document.documentElement.setAttribute('data-dsh-overlay', 'true');");
                 if (enableFastStart) {
                     sb.append("    document.documentElement.setAttribute('data-dsh-fast-start', 'true');");
+                    sb.append("    document.documentElement.removeAttribute('data-dsh-edge-glow');");
                 } else {
                     sb.append("    document.documentElement.removeAttribute('data-dsh-fast-start');");
+                    sb.append("    document.documentElement.removeAttribute('data-dsh-edge-glow');");
                 }
                 sb.append("    window.__DSH_OVERLAY__ = true;");
                 if (!cssBase64.isEmpty()) {
@@ -674,6 +686,7 @@ public class DemoDialogActivity extends Activity {
             } else {
                 sb.append("    document.documentElement.removeAttribute('data-dsh-overlay');");
                 sb.append("    document.documentElement.removeAttribute('data-dsh-fast-start');");
+                sb.append("    document.documentElement.removeAttribute('data-dsh-edge-glow');");
                 sb.append("    window.__DSH_OVERLAY__ = false;");
                 sb.append("    var st = document.getElementById('dsh-overlay-injected-style'); if (st) st.remove();");
                 sb.append("    var eb = document.getElementById('dsh-early-boot-hide'); if (eb) eb.remove();");
