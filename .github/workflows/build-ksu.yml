@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/overlay-swipe-sidebars
   workflow_dispatch:
 
 permissions:
