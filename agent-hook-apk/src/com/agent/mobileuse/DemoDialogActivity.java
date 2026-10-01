@@ -135,6 +135,26 @@ public class DemoDialogActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void showSoftInput() {
+            if (mActivity != null) {
+                mActivity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            if (mActivity.mWebView != null) {
+                                mActivity.mWebView.requestFocus();
+                                InputMethodManager imm = (InputMethodManager) mActivity.getSystemService(Context.INPUT_METHOD_SERVICE);
+                                if (imm != null) imm.showSoftInput(mActivity.mWebView, InputMethodManager.SHOW_IMPLICIT);
+                            }
+                        } catch (Throwable t) {
+                            Log.w(TAG, "Error showing soft input: " + t.getMessage());
+                        }
+                    }
+                });
+            }
+        }
+
+        @JavascriptInterface
         public void hideSoftInput() {
             if (mActivity != null) {
                 mActivity.runOnUiThread(new Runnable() {
@@ -176,6 +196,7 @@ public class DemoDialogActivity extends Activity {
     private ValueCallback<Uri[]> mFilePathCallback;
     private String mTargetSessionId = null;
     private String mTargetUrl = null;
+    private boolean mFocusInputOnLaunch = false;
     private volatile boolean mPageFinished = false;
     private boolean mStartupFadeScheduled = false;
 
@@ -203,6 +224,7 @@ public class DemoDialogActivity extends Activity {
             mTargetUrl = intent.getStringExtra("target_url");
             mTargetSessionId = intent.getStringExtra("session_id");
             if (mTargetSessionId == null) mTargetSessionId = intent.getStringExtra("session");
+            mFocusInputOnLaunch = intent.getBooleanExtra("focus_input", false);
         }
 
         mMainHandler = new Handler(Looper.getMainLooper());
@@ -258,9 +280,11 @@ public class DemoDialogActivity extends Activity {
                 sid = intent.getStringExtra("session");
             }
             mTargetSessionId = sid;
+            mFocusInputOnLaunch = intent.getBooleanExtra("focus_input", false);
         } else {
             mTargetUrl = null;
             mTargetSessionId = null;
+            mFocusInputOnLaunch = false;
         }
         loadWebConsole();
     }
@@ -599,7 +623,8 @@ public class DemoDialogActivity extends Activity {
             sb.append("      enableTranslucent: ").append(enableTranslucent).append(",");
             sb.append("      enableFastStart: ").append(enableFastStart).append(",");
             sb.append("      enableWhale: ").append(enableWhale).append(",");
-            sb.append("      enableKeyboardAssist: ").append(enableKbAssist);
+            sb.append("      enableKeyboardAssist: ").append(enableKbAssist).append(",");
+            sb.append("      focusInputOnLaunch: ").append(mFocusInputOnLaunch);
             sb.append("    };");
             if (enableTranslucent) {
                 sb.append("    document.documentElement.setAttribute('data-dsh-overlay', 'true');");
