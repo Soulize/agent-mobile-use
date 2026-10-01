@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -63,8 +66,29 @@ jobs:
           curl -fL             https://artifactory.appodeal.com/appodeal-public/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
           sudo cp /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
 
+      - name: Prepare fixed APK signing key
+        shell: bash
+        env:
+          APK_SIGNING_KEYSTORE_B64: ${{ secrets.APK_SIGNING_KEYSTORE_B64 }}
+          APK_SIGNING_PASSWORD: ${{ secrets.APK_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$APK_SIGNING_KEYSTORE_B64" ] || [ -z "$APK_SIGNING_PASSWORD" ]; then
+            echo "Fixed APK signing secrets are not configured." >&2
+            echo "Required secrets: APK_SIGNING_KEYSTORE_B64 and APK_SIGNING_PASSWORD" >&2
+            exit 1
+          fi
+
+          SIGNING_KEYSTORE="$RUNNER_TEMP/agent-mobile-use.p12"
+          printf '%s' "$APK_SIGNING_KEYSTORE_B64" | base64 --decode > "$SIGNING_KEYSTORE"
+          chmod 600 "$SIGNING_KEYSTORE"
+          echo "APK_SIGNING_KEYSTORE=$SIGNING_KEYSTORE" >> "$GITHUB_ENV"
+
       - name: Build hook APK
         shell: bash
+        env:
+          APK_SIGNING_PASSWORD: ${{ secrets.APK_SIGNING_PASSWORD }}
         run: |
           set -euxo pipefail
           chmod +x agent-hook-apk/build.sh
