@@ -230,6 +230,20 @@ html[data-dsh-overlay="true"] [class*="_centerCol"] {
   pointer-events: auto !important;
 }
 
+/* Override the older narrow-screen rule that collapses center when DSH marks
+   the left sidebar expanded. In overlay drawer mode Home must stay full-size
+   underneath the fixed sidebar at all times. */
+html[data-dsh-overlay="true"] [class*="_frame"]:not([data-sidebar-collapsed]) [class*="_centerCol"] {
+  grid-column: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
 /* Left/session drawer */
 html[data-dsh-overlay="true"] [class*="_sidebarCol"] {
   position: fixed !important;
@@ -312,7 +326,7 @@ html[data-dsh-overlay="true"]:has([data-sidebar-right-session][data-sidebar-righ
   left: 0 !important;
   top: 0 !important;
   bottom: 0 !important;
-  width: 28px !important;
+  width: 84px !important;
   z-index: 140 !important;
   background: transparent !important;
   touch-action: none !important;
