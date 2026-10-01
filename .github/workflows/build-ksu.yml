@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/overlay-focus-input-intent-latest-main
   workflow_dispatch:
 
 permissions:
