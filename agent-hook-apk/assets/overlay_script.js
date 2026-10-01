@@ -185,6 +185,45 @@
 
     var cfg = window.__DSH_MOBILE_CONFIG__ || {};
 
+    // Optional one-shot launch focus requested by DemoDialogActivity.
+    // Programmatic focus is normally blocked above to prevent unwanted IME
+    // popups; this path deliberately bypasses that guard for an explicit
+    // focus_input=true launch.
+    if (cfg.focusInputOnLaunch === true) {
+      var focusInputAttempts = 0;
+      var focusComposerOnLaunch = function () {
+        var input = document.querySelector(
+          '[data-composer-input] textarea, [data-composer-input] [contenteditable="true"], ' +
+          '[data-composer-input], [data-lexical-editor="true"], ' +
+          '[data-slot="conversation.composer"] textarea, [data-slot="conversation.composer"] [contenteditable="true"], ' +
+          'textarea[placeholder], [contenteditable="true"][role="textbox"]'
+        );
+        if (input) {
+          userTouchingInputRecently = true;
+          if (userTouchingInputTimer) clearTimeout(userTouchingInputTimer);
+          try {
+            input.focus({ preventScroll: true });
+          } catch (e) {
+            try { input.focus(); } catch (ignored) {}
+          }
+          userTouchingInputTimer = setTimeout(function () {
+            userTouchingInputRecently = false;
+          }, 500);
+          try {
+            if (window.DSHOverlayBridge && typeof window.DSHOverlayBridge.showSoftInput === "function") {
+              window.DSHOverlayBridge.showSoftInput();
+            }
+          } catch (e) {}
+          scrollChatToBottom();
+          return;
+        }
+        if (focusInputAttempts++ < 30) {
+          setTimeout(focusComposerOnLaunch, 100);
+        }
+      };
+      setTimeout(focusComposerOnLaunch, 100);
+    }
+
     var sidebarToggleSelector = '[data-slot="sidebar-toggle"], [aria-label*="sidebar" i], [aria-label*="侧边栏"], button[class*="toggleSidebar"], button[class*="_toggle"]';
 
     var collapseSidebarOnce = function () {
