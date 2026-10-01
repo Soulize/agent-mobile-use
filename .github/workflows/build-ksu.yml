@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/observe-capture-passthrough
   workflow_dispatch:
 
 permissions:
@@ -99,7 +100,7 @@ jobs:
       - name: Upload KernelSU package
         uses: actions/upload-artifact@v4
         with:
-          name: agent-mobile-use-ksu-main
+          name: agent-mobile-use-ksu-observe-capture-passthrough
           path: agent-mobile-use-ksu.zip
           if-no-files-found: error
           retention-days: 14
