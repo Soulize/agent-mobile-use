@@ -453,18 +453,6 @@
     };
     resetRightSidebarOnOverlayOpen();
 
-    // Android edge-to-edge WebView does not reliably expose CSS safe-area
-    // env() values. Mirror the actual status-bar inset through the JS bridge.
-    var syncAndroidSafeArea = function () {
-      try {
-        var top = window.DSHOverlayBridge && window.DSHOverlayBridge.getStatusBarInsetTop
-          ? Number(window.DSHOverlayBridge.getStatusBarInsetTop()) || 0
-          : 0;
-        document.documentElement.style.setProperty("--dsh-android-safe-top", Math.max(0, top) + "px");
-      } catch (e) {}
-    };
-    syncAndroidSafeArea();
-
     // 7. Horizontal navigation gestures for the two DSH sidebars.
     // Home: swipe right -> left/session sidebar; swipe left -> right/content sidebar.
     // Left sidebar: swipe left -> close. Right sidebar: swipe right -> close.
@@ -567,6 +555,14 @@
       if (dx > 0) openLeftSidebar();
       else openRightSidebar();
     };
+
+    var rightSwipeEdge = document.querySelector(".dsh-overlay-right-swipe-edge");
+    if (!rightSwipeEdge) {
+      rightSwipeEdge = document.createElement("div");
+      rightSwipeEdge.className = "dsh-overlay-right-swipe-edge";
+      rightSwipeEdge.setAttribute("aria-hidden", "true");
+      document.body.appendChild(rightSwipeEdge);
+    }
 
     document.addEventListener("touchstart", onSwipeStart, { capture: true, passive: true });
     document.addEventListener("touchend", onSwipeEnd, { capture: true, passive: true });
