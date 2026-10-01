@@ -432,7 +432,125 @@
     }
     window.addEventListener("resize", onViewportResize);
 
-    // 7. Periodic session reporting to OverlayBridge
+    // 7. Horizontal navigation gestures for the two DSH sidebars.
+    // Home: swipe right -> left/session sidebar; swipe left -> right/content sidebar.
+    // Left sidebar: swipe left -> close. Right sidebar: swipe right -> close.
+    var swipeStartX = 0;
+    var swipeStartY = 0;
+    var swipeTracking = false;
+    var SWIPE_MIN_X = 72;
+    var SWIPE_MAX_Y = 64;
+    var SWIPE_DOMINANCE = 1.35;
+
+    var leftSidebarIsOpen = function () {
+      var frame = document.querySelector('[class*="_frame"]');
+      return !!(frame && !frame.hasAttribute("data-sidebar-collapsed"));
+    };
+
+    var rightSidebarIsOpen = function () {
+      return !!document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
+    };
+
+    var openLeftSidebar = function () {
+      if (rightSidebarIsOpen()) return false;
+      var frame = document.querySelector('[class*="_frame"]');
+      if (!frame || !frame.hasAttribute("data-sidebar-collapsed")) return false;
+      var toggleBtn = document.querySelector(sidebarToggleSelector);
+      if (!toggleBtn) return false;
+      toggleBtn.click();
+      return true;
+    };
+
+    var closeLeftSidebar = function () {
+      if (!leftSidebarIsOpen()) return false;
+      return collapseSidebarOnce();
+    };
+
+    var findRightSidebarExpand = function () {
+      return document.querySelector('[data-sidebar-right-expand]');
+    };
+
+    var openRightSidebar = function () {
+      if (leftSidebarIsOpen() || rightSidebarIsOpen()) return false;
+      var expand = findRightSidebarExpand();
+      if (!expand) return false;
+      expand.click();
+      return true;
+    };
+
+    var closeRightSidebar = function () {
+      var panel = document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
+      if (!panel) return false;
+      var toggle = panel.querySelector('[data-sidebar-right-toggle]') ||
+        document.querySelector('[data-sidebar-right-toggle]');
+      if (!toggle) return false;
+      toggle.click();
+      return true;
+    };
+
+    var gestureIgnoredTarget = function (target) {
+      return !!(target && target.closest && target.closest(
+        'input, textarea, select, [contenteditable="true"], [role="textbox"], ' +
+        '[data-lexical-editor], [data-composer-input], ' +
+        '[data-sidebar-right-tab] iframe, [class*="_resizer"], [class*="_resizeHandle"]'
+      ));
+    };
+
+    var onSwipeStart = function (event) {
+      if (!event.touches || event.touches.length !== 1) {
+        swipeTracking = false;
+        return;
+      }
+      var target = event.target instanceof Element ? event.target : null;
+      if (gestureIgnoredTarget(target)) {
+        swipeTracking = false;
+        return;
+      }
+      swipeStartX = event.touches[0].clientX;
+      swipeStartY = event.touches[0].clientY;
+      swipeTracking = true;
+    };
+
+    var onSwipeEnd = function (event) {
+      if (!swipeTracking) return;
+      swipeTracking = false;
+      if (!event.changedTouches || event.changedTouches.length !== 1) return;
+
+      var dx = event.changedTouches[0].clientX - swipeStartX;
+      var dy = event.changedTouches[0].clientY - swipeStartY;
+      var absX = Math.abs(dx);
+      var absY = Math.abs(dy);
+      if (absX < SWIPE_MIN_X || absY > SWIPE_MAX_Y || absX < absY * SWIPE_DOMINANCE) return;
+
+      // Sidebars consume only their closing direction. The home view uses the
+      // opposite directions to enter the left and right sidebars.
+      if (leftSidebarIsOpen()) {
+        if (dx < 0) closeLeftSidebar();
+        return;
+      }
+      if (rightSidebarIsOpen()) {
+        if (dx > 0) closeRightSidebar();
+        return;
+      }
+      if (dx > 0) openLeftSidebar();
+      else openRightSidebar();
+    };
+
+    document.addEventListener("touchstart", onSwipeStart, { capture: true, passive: true });
+    document.addEventListener("touchend", onSwipeEnd, { capture: true, passive: true });
+
+    // The current DSH build already ships the right-sidebar/document-preview
+    // stack. File links should be allowed to reach its native click handlers;
+    // when they open content, the right panel is revealed by sidebarRight.
+    // Expose small helpers for Android/WebView diagnostics without replacing
+    // DSH's resource addressing or preview providers.
+    window.DSH_OVERLAY_OPEN_LEFT_SIDEBAR = openLeftSidebar;
+    window.DSH_OVERLAY_CLOSE_LEFT_SIDEBAR = closeLeftSidebar;
+    window.DSH_OVERLAY_OPEN_RIGHT_SIDEBAR = openRightSidebar;
+    window.DSH_OVERLAY_CLOSE_RIGHT_SIDEBAR = closeRightSidebar;
+
+    // 8. Periodic session reporting to OverlayBridge
+
     setInterval(function() {
       try {
         var raw = localStorage.getItem('dsh.sessions.current');
