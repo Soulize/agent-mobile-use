@@ -135,6 +135,11 @@ public class DemoDialogActivity extends Activity {
         }
 
         @JavascriptInterface
+        public int getStatusBarInsetTop() {
+            return mActivity != null ? mActivity.mStatusBarInsetTop : 0;
+        }
+
+        @JavascriptInterface
         public void hideSoftInput() {
             if (mActivity != null) {
                 mActivity.runOnUiThread(new Runnable() {
@@ -170,6 +175,7 @@ public class DemoDialogActivity extends Activity {
     private WebView mWebView;
     private ProgressBar mProgressBar;
     private volatile boolean mIsKeyboardShowing = false;
+    private volatile int mStatusBarInsetTop = 0;
     private static final int REQUEST_CODE_PERMISSIONS = 1001;
     private static final int REQUEST_CODE_FILE_CHOOSER = 1002;
     private PermissionRequest mPendingPermissionRequest;
@@ -291,22 +297,34 @@ public class DemoDialogActivity extends Activity {
             @Override
             public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
                 int bottom = 0;
+                int top = 0;
                 if (insets != null) {
                     try {
-                        // API 30+ WindowInsets.Type.ime()
+                        // API 30+ WindowInsets.Type.ime() / statusBars()
                         Class<?> typeClass = Class.forName("android.view.WindowInsets$Type");
                         java.lang.reflect.Method imeMethod = typeClass.getMethod("ime");
+                        java.lang.reflect.Method statusMethod = typeClass.getMethod("statusBars");
                         int imeType = ((Integer) imeMethod.invoke(null)).intValue();
+                        int statusType = ((Integer) statusMethod.invoke(null)).intValue();
                         java.lang.reflect.Method getInsetsMethod = WindowInsets.class.getMethod("getInsets", int.class);
-                        Object insetsObj = getInsetsMethod.invoke(insets, Integer.valueOf(imeType));
-                        if (insetsObj != null) {
-                            java.lang.reflect.Field bottomField = insetsObj.getClass().getField("bottom");
-                            bottom = bottomField.getInt(insetsObj);
+
+                        Object imeInsets = getInsetsMethod.invoke(insets, Integer.valueOf(imeType));
+                        if (imeInsets != null) {
+                            java.lang.reflect.Field bottomField = imeInsets.getClass().getField("bottom");
+                            bottom = bottomField.getInt(imeInsets);
+                        }
+
+                        Object statusInsets = getInsetsMethod.invoke(insets, Integer.valueOf(statusType));
+                        if (statusInsets != null) {
+                            java.lang.reflect.Field topField = statusInsets.getClass().getField("top");
+                            top = topField.getInt(statusInsets);
                         }
                     } catch (Throwable ignored) {
                         bottom = insets.getSystemWindowInsetBottom();
+                        top = insets.getSystemWindowInsetTop();
                     }
                     mIsKeyboardShowing = (bottom > 200);
+                    mStatusBarInsetTop = Math.max(0, top);
                     v.setPadding(0, 0, 0, bottom);
                 }
                 return insets;
