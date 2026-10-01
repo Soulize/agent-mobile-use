@@ -1033,6 +1033,25 @@ func resolveBootClasspath() (string, string) {
 		return bcp, dex2oatBcp
 	}
 
+	// Try reading directly from system_server environment for exact framework and mainline classpath
+	if pidBytes, err := exec.Command("/system/bin/pidof", "system_server").Output(); err == nil {
+		pids := strings.Fields(string(pidBytes))
+		if len(pids) > 0 {
+			if envData, err := os.ReadFile(fmt.Sprintf("/proc/%s/environ", pids[0])); err == nil {
+				for _, entry := range strings.Split(string(envData), "\x00") {
+					if strings.HasPrefix(entry, "BOOTCLASSPATH=") && bcp == "" {
+						bcp = strings.TrimPrefix(entry, "BOOTCLASSPATH=")
+					} else if strings.HasPrefix(entry, "DEX2OATBOOTCLASSPATH=") && dex2oatBcp == "" {
+						dex2oatBcp = strings.TrimPrefix(entry, "DEX2OATBOOTCLASSPATH=")
+					}
+				}
+				if bcp != "" && dex2oatBcp != "" {
+					return bcp, dex2oatBcp
+				}
+			}
+		}
+	}
+
 	baseJars := []string{
 		"/apex/com.android.art/javalib/core-oj.jar",
 		"/apex/com.android.art/javalib/core-libart.jar",
@@ -2000,15 +2019,15 @@ func main() {
 			}
 			json.NewEncoder(w).Encode(ActionResponse{Success: true, Message: actionDesc, Data: textStr})
 
-		case "type":
+		case "set_value":
 			targetSpec := "focused"
 			if targetStr != "" {
 				targetSpec = targetStr
 			}
 			b64 := base64.StdEncoding.EncodeToString([]byte(p.Text))
-			out, reqErr := globalDumpDaemon.Request(fmt.Sprintf("type_b64 %d %s %s", targetDid, targetSpec, b64))
+			out, reqErr := globalDumpDaemon.Request(fmt.Sprintf("set_value_b64 %d %s %s", targetDid, targetSpec, b64))
 			if reqErr != nil {
-				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Type request failed: %v", reqErr)})
+				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Set value request failed: %v", reqErr)})
 				return
 			}
 			var tp struct {
@@ -2019,7 +2038,7 @@ func main() {
 				VerifiedText string `json:"verified_text"`
 			}
 			if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &tp); err != nil {
-				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Invalid type response: %v", err)})
+				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Invalid set_value response: %v", err)})
 				return
 			}
 			if !tp.OK {
@@ -2027,11 +2046,15 @@ func main() {
 				if tp.Reason != "" {
 					errMsg = fmt.Sprintf("%s (%s)", tp.Error, tp.Reason)
 				}
-				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Type failed: %s", errMsg)})
+				json.NewEncoder(w).Encode(ActionResponse{Success: false, Message: fmt.Sprintf("Set value failed: %s", errMsg)})
 				return
 			}
 
-			actionDesc := fmt.Sprintf("OK: Text injected [cost=%dms]", tp.CostMs)
+			actionTarget := targetStr
+			if actionTarget == "" {
+				actionTarget = "focused"
+			}
+			actionDesc := fmt.Sprintf("OK: Set value on target %s [cost=%dms]", actionTarget, tp.CostMs)
 			if tp.VerifiedText != "" {
 				actionDesc += fmt.Sprintf(" | after=\"%s\"", tp.VerifiedText)
 			}

@@ -663,12 +663,12 @@ public class ToolMain {
                             if ("--no-system-ui".equals(tokens[ai])) dropSystemUi = true;
                         }
                         dumpTreeWithUi(uiAutomation, uiClass, displayId, budgetOverride, dropSystemUi);
-                    } else if ("type".equals(action) || "type_b64".equals(action)) {
+                    } else if ("set_value".equals(action) || "set_value_b64".equals(action)) {
                         if (tokens.length >= 3) {
                             int displayId = Integer.parseInt(tokens[1]);
                             String targetSpec = tokens[2];
                             String text = "";
-                            if ("type_b64".equals(action)) {
+                            if ("set_value_b64".equals(action)) {
                                 if (tokens.length >= 4) {
                                     try {
                                         byte[] decoded = android.util.Base64.decode(tokens[3], android.util.Base64.DEFAULT);
@@ -683,7 +683,7 @@ public class ToolMain {
                                     text = line.substring(textIdx + targetSpec.length()).trim();
                                 }
                             }
-                            smartTypeWithUi(uiAutomation, uiClass, displayId, targetSpec, text);
+                            setValueWithUi(uiAutomation, uiClass, displayId, targetSpec, text);
                         } else {
                             System.out.print("fail error=\"Invalid " + action + " command in daemon\"");
                         }
@@ -1900,7 +1900,7 @@ public class ToolMain {
      * 4. If submit is true AND the write succeeded, dispatch KEYCODE_ENTER.
      * 5. Return structured JSON with the classification and before/after evidence.
      */
-    private static void smartTypeWithUi(Object uiAutomation, Class<?> uiClass, int targetDisplayId, String targetSpec, String text) {
+    private static void setValueWithUi(Object uiAutomation, Class<?> uiClass, int targetDisplayId, String targetSpec, String text) {
         String err = null;
         String mode = "none";
         String error = null;
@@ -1915,88 +1915,85 @@ public class ToolMain {
         long start = System.currentTimeMillis();
 
         try {
-
-            List<AccessibilityNodeInfo> all = new ArrayList<AccessibilityNodeInfo>();
-            List<NodeItem> nodeList = new ArrayList<NodeItem>();
-            boolean dropSystemUi = (targetDisplayId == 0);
-            java.util.Set<String> chromeTitles = dropSystemUi
-                    ? systemChromeTitles() : java.util.Collections.<String>emptySet();
-
-            for (int scanPass = 0; scanPass < 3; scanPass++) {
-                all.clear();
-                nodeList.clear();
-                Object displays = uiClass.getMethod("getWindowsOnAllDisplays").invoke(uiAutomation);
-                if (displays != null) {
-                    Class<?> saClass = displays.getClass();
-                    int sizeN = (Integer) saClass.getMethod("size").invoke(displays);
-                    Method keyAt = saClass.getMethod("keyAt", int.class);
-                    Method valueAt = saClass.getMethod("valueAt", int.class);
-                    for (int i = 0; i < sizeN; i++) {
-                        int dId = (Integer) keyAt.invoke(displays, i);
-                        if (dId != targetDisplayId) continue;
-                        List<?> wins = (List<?>) valueAt.invoke(displays, i);
-                        if (wins == null) continue;
-                        int winIndex = 0;
-                        int[] idCounter = new int[] { 1 };
-                        for (Object win : wins) {
-                            Object rootObj;
-                            try {
-                                rootObj = win.getClass().getMethod("getRoot").invoke(win);
-                            } catch (Throwable t) {
-                                rootObj = null;
-                            }
-                            AccessibilityNodeInfo rootNode = (rootObj instanceof AccessibilityNodeInfo)
-                                    ? (AccessibilityNodeInfo) rootObj : null;
-                            if (dropSystemUi && isSystemUiWindow(win, chromeTitles, rootNode)) {
-                                continue;
-                            }
-                            if (rootNode != null) {
-                                collectAll(rootNode, 0, all);
-                                collectInteractiveNodes(rootNode, 0, null, nodeList, idCounter, winIndex);
-                            }
-                            winIndex++;
-                        }
-                    }
-                }
-                if (!all.isEmpty()) break;
-                Thread.sleep(300);
-            }
-
-            AccessibilityNodeInfo targetNode = null;
             boolean focusMode = targetSpec == null || targetSpec.isEmpty() || "focused".equalsIgnoreCase(targetSpec);
-            if (focusMode) {
-                // Focus Mode: type into currently focused input field
-                AccessibilityNodeInfo focusedAny = null;
-                for (AccessibilityNodeInfo an : all) {
-                    if (an.isFocused() && an.isEditable()) { targetNode = an; break; }
-                    if (focusedAny == null && an.isFocused()) focusedAny = an;
-                }
-                if (targetNode == null && focusedAny != null) {
-                    targetNode = findFirstEditable(focusedAny);
-                }
-                if (targetNode == null) {
-                    error = "no_focused_input";
-                    if (focusedAny == null) {
-                        focusHint = "nothing";
-                    } else {
-                        String fc = focusedAny.getClassName() != null
-                                ? simplifyType(focusedAny.getClassName().toString()) : "View";
-                        focusHint = fc + "@" + rectStr(focusedAny);
-                    }
-                    reason = "No input field is currently focused. Please click the field first to focus, then type without target.";
-                }
-            } else {
-                // Numeric Node ID Mode: targetSpec must be a numeric node ID from dump tree (e.g. '146' or 'node:146')
+            int targetId = -1;
+            if (!focusMode) {
                 String cleanSpec = targetSpec.startsWith("node:") ? targetSpec.substring(5).trim() : targetSpec.trim();
-                int targetId = -1;
                 try {
                     targetId = Integer.parseInt(cleanSpec);
                 } catch (NumberFormatException nfe) {
                     error = "invalid_target";
                     reason = "Invalid target '" + targetSpec + "'. Target must be a numeric node ID from dump tree (e.g. '146') or omitted for focus mode.";
                 }
+            }
 
-                if (targetId >= 0) {
+            if (error == null) {
+                List<AccessibilityNodeInfo> all = new ArrayList<AccessibilityNodeInfo>();
+                List<NodeItem> nodeList = new ArrayList<NodeItem>();
+                boolean dropSystemUi = (targetDisplayId == 0);
+                java.util.Set<String> chromeTitles = dropSystemUi
+                        ? systemChromeTitles() : java.util.Collections.<String>emptySet();
+
+                for (int scanPass = 0; scanPass < 3; scanPass++) {
+                    all.clear();
+                    nodeList.clear();
+                    Object displays = uiClass.getMethod("getWindowsOnAllDisplays").invoke(uiAutomation);
+                    if (displays != null) {
+                        Class<?> saClass = displays.getClass();
+                        int sizeN = (Integer) saClass.getMethod("size").invoke(displays);
+                        Method keyAt = saClass.getMethod("keyAt", int.class);
+                        Method valueAt = saClass.getMethod("valueAt", int.class);
+                        for (int i = 0; i < sizeN; i++) {
+                            int dId = (Integer) keyAt.invoke(displays, i);
+                            if (dId != targetDisplayId) continue;
+                            List<?> wins = (List<?>) valueAt.invoke(displays, i);
+                            if (wins == null) continue;
+                            int winIndex = 0;
+                            int[] idCounter = new int[] { 1 };
+                            for (Object win : wins) {
+                                Object rootObj;
+                                try {
+                                    rootObj = win.getClass().getMethod("getRoot").invoke(win);
+                                } catch (Throwable t) {
+                                    rootObj = null;
+                                }
+                                AccessibilityNodeInfo rootNode = (rootObj instanceof AccessibilityNodeInfo)
+                                        ? (AccessibilityNodeInfo) rootObj : null;
+                                if (dropSystemUi && isSystemUiWindow(win, chromeTitles, rootNode)) {
+                                    continue;
+                                }
+                                if (rootNode != null) {
+                                    collectAll(rootNode, 0, all);
+                                    collectInteractiveNodes(rootNode, 0, null, nodeList, idCounter, winIndex);
+                                }
+                                winIndex++;
+                            }
+                        }
+                    }
+                    if (!all.isEmpty()) break;
+                    Thread.sleep(300);
+                }
+
+                AccessibilityNodeInfo targetNode = null;
+                if (focusMode) {
+                    AccessibilityNodeInfo focusedAny = null;
+                    for (AccessibilityNodeInfo an : all) {
+                        if (an.isFocused() && an.isEditable()) { targetNode = an; break; }
+                        if (focusedAny == null && an.isFocused()) focusedAny = an;
+                    }
+                    if (targetNode == null && focusedAny != null) {
+                        targetNode = findFirstEditable(focusedAny);
+                    }
+                    if (targetNode == null) {
+                        error = "no_focused_input";
+                        if (focusedAny != null) {
+                            String fc = focusedAny.getClassName() != null
+                                    ? simplifyType(focusedAny.getClassName().toString()) : "View";
+                            focusHint = fc + "@" + rectStr(focusedAny);
+                        }
+                        reason = "No input field is currently focused.";
+                    }
+                } else {
                     NodeItem matchedItem = null;
                     for (NodeItem item : nodeList) {
                         if (item.id == targetId) {
@@ -2006,7 +2003,7 @@ public class ToolMain {
                     }
                     if (matchedItem == null) {
                         error = "target_not_found";
-                        reason = "Node " + targetId + " not found on screen (screen may have refreshed). Fallback: click the field to focus, then type without target.";
+                        reason = "Node " + targetId + " not found on screen.";
                     } else {
                         AccessibilityNodeInfo raw = matchedItem.rawNode;
                         if (raw != null) {
@@ -2014,55 +2011,46 @@ public class ToolMain {
                         }
                         if (targetNode == null) {
                             error = "target_not_editable";
-                            reason = "Node " + targetId + " (" + matchedItem.type + ") is not an editable field and contains no editable child. Fallback: click it to focus, then type without target.";
+                            reason = "Node " + targetId + " (" + matchedItem.type + ") is not an editable field.";
                             if (matchedItem.text != null) beforeTxt = matchedItem.text;
-                        } else {
-                            vid = targetNode.getViewIdResourceName();
-                            cls = targetNode.getClassName() != null ? targetNode.getClassName().toString() : null;
-                            boundsStr = rectStr(targetNode);
                         }
                     }
                 }
-            }
 
-            // The single injection path: one ACTION_SET_TEXT, one read-back, one verdict.
-            // There is deliberately no second strategy below this — a failure stops here
-            // and is reported with evidence, because every fallback this had before
-            // (tap target center, then clipboard paste) turned a wrong resolution into
-            // a stray click or a clobbered clipboard.
-            if (targetNode != null && error == null) {
-                vid = targetNode.getViewIdResourceName();
-                cls = targetNode.getClassName() != null ? targetNode.getClassName().toString() : null;
-                if (boundsStr == null) boundsStr = rectStr(targetNode);
-                beforeTxt = targetNode.getText() != null ? targetNode.getText().toString() : null;
+                if (targetNode != null && error == null) {
+                    vid = targetNode.getViewIdResourceName();
+                    cls = targetNode.getClassName() != null ? targetNode.getClassName().toString() : null;
+                    boundsStr = rectStr(targetNode);
+                    beforeTxt = targetNode.getText() != null ? targetNode.getText().toString() : null;
 
-                android.os.Bundle args = new android.os.Bundle();
-                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
-                boolean setOk = false;
-                try {
-                    setOk = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-                } catch (Throwable ignored) {}
+                    try { targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS); } catch (Throwable ignored) {}
 
-                if (!setOk) {
-                    error = "inject_rejected";
-                } else {
-                    mode = "action_set_text";
-                    Thread.sleep(60);
-                    boolean fresh = true;
-                    try { fresh = targetNode.refresh(); } catch (Throwable t) { fresh = false; }
-                    afterTxt = targetNode.getText() != null ? targetNode.getText().toString() : null;
-                    if (!fresh) {
-                        ok = true; error = "verify_unavailable"; reason = "stale_node";
-                    } else if (afterTxt == null) {
-                        ok = true; error = "verify_unavailable"; reason = "unreadable";
-                    } else if (afterTxt.equals(text)) {
-                        ok = true;
-                    } else if (isMasked(afterTxt, text)) {
-                        ok = true; error = "verify_unavailable"; reason = "masked";
+                    android.os.Bundle args = new android.os.Bundle();
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+                    boolean setOk = false;
+                    try {
+                        setOk = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                    } catch (Throwable ignored) {}
+
+                    if (!setOk) {
+                        error = "inject_rejected";
                     } else {
-                        // Readable but different from what was sent: report it with
-                        // before/after evidence instead of guessing "close enough".
-                        error = "verify_mismatch";
+                        mode = "action_set_text";
+                        Thread.sleep(60);
+                        boolean fresh = true;
+                        try { fresh = targetNode.refresh(); } catch (Throwable t) { fresh = false; }
+                        afterTxt = targetNode.getText() != null ? targetNode.getText().toString() : null;
+                        if (!fresh) {
+                            ok = true; error = "verify_unavailable"; reason = "stale_node";
+                        } else if (afterTxt == null) {
+                            ok = true; error = "verify_unavailable"; reason = "unreadable";
+                        } else if (afterTxt.equals(text)) {
+                            ok = true;
+                        } else if (isMasked(afterTxt, text)) {
+                            ok = true; error = "verify_unavailable"; reason = "masked";
+                        } else {
+                            error = "verify_mismatch";
+                        }
                     }
                 }
             }
