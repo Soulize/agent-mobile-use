@@ -106,7 +106,19 @@ jobs:
           VERSION="$(sed -n 's/^version=//p' ksu-module/module.prop)"
           KSU_ZIP="release/agent-mobile-use-ksu-v${VERSION}.zip"
 
-          "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner"             verify --verbose --print-certs agent-hook-apk/build/agent_hook.apk
+          "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner" \
+            verify --verbose --print-certs agent-hook-apk/build/agent_hook.apk
+
+          APK_BADGING="$("$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt" dump badging agent-hook-apk/build/agent_hook.apk)"
+          printf '%s\n' "$APK_BADGING"
+          grep -Fq "package: name='com.agent.mobileuse' versionCode='800' versionName='0.8.0-alpha'" <<<"$APK_BADGING"
+          grep -Fq "sdkVersion:'26'" <<<"$APK_BADGING"
+          grep -Fq "targetSdkVersion:'28'" <<<"$APK_BADGING"
+
+          APK_XML="$("$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt" dump xmltree agent-hook-apk/build/agent_hook.apk AndroidManifest.xml)"
+          grep -Fq 'A: android:name(0x01010003)="xposedmodule"' <<<"$APK_XML"
+          grep -Fq 'A: android:name(0x01010003)="xposedminversion"' <<<"$APK_XML"
+          grep -Fq 'A: android:name(0x01010003)="xposedscope"' <<<"$APK_XML"
 
           file vd-server-go/vd_server | grep -q "ARM aarch64"
           test -s vd-tool-java/bin/agent_tools.dex
