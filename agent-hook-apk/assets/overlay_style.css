@@ -173,33 +173,6 @@ html[data-dsh-overlay="true"] [class*="_boot"] [class*="_card"] {
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
-  /* Grid column stability on mobile screens */
-  [class*="_sidebarCol"] {
-    grid-column: 1 !important;
-  }
-  [class*="_centerCol"] {
-    grid-column: 2 !important;
-  }
-  /* 3. Expanded sidebar on narrow screens: take 100% full width and collapse center */
-  [class*="_frame"]:not([data-sidebar-collapsed]) {
-    grid-template-columns: 100% 0px 0px !important;
-  }
-  [class*="_frame"]:not([data-sidebar-collapsed]) [class*="_sidebarCol"] {
-    width: 100% !important;
-    min-width: 100% !important;
-    max-width: 100% !important;
-    overflow: hidden !important;
-    z-index: 60 !important;
-  }
-  [class*="_frame"]:not([data-sidebar-collapsed]) [class*="_centerCol"] {
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: hidden !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-  }
 }
 
 /* ── overlay floating chat mode ── */
@@ -230,19 +203,6 @@ html[data-dsh-overlay="true"] [class*="_centerCol"] {
   pointer-events: auto !important;
 }
 
-/* Override the older narrow-screen rule that collapses center when DSH marks
-   the left sidebar expanded. In overlay drawer mode Home must stay full-size
-   underneath the fixed sidebar at all times. */
-html[data-dsh-overlay="true"] [class*="_frame"]:not([data-sidebar-collapsed]) [class*="_centerCol"] {
-  grid-column: 2 !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: 100% !important;
-  overflow: visible !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
 
 /* Left/session drawer */
 html[data-dsh-overlay="true"] [class*="_sidebarCol"] {
