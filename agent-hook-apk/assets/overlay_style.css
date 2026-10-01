@@ -293,59 +293,6 @@ html[data-dsh-overlay="true"] [data-sidebar-right-session][data-sidebar-right-op
   box-sizing: border-box !important;
 }
 
-/* Web-profile fallback for HTTP(S) links. DSH's sidebar Browser is disabled in
-   the stock Web profile, so the Android overlay supplies an isolated right
-   surface instead of navigating the host WebView away from DSH. */
-html[data-dsh-overlay="true"] .dsh-overlay-browser {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 100 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  box-sizing: border-box !important;
-  padding-top: max(var(--dsh-android-safe-top, 0px), env(safe-area-inset-top, 0px)) !important;
-  background: rgba(22, 25, 33, 0.99) !important;
-}
-html[data-dsh-overlay="true"] .dsh-overlay-browser-bar {
-  height: 48px !important;
-  min-height: 48px !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 0 10px !important;
-  box-sizing: border-box !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
-  background: rgba(22, 25, 33, 0.98) !important;
-}
-html[data-dsh-overlay="true"] .dsh-overlay-browser-close {
-  width: 36px !important;
-  height: 36px !important;
-  flex: 0 0 36px !important;
-  border: 0 !important;
-  border-radius: 18px !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: #fff !important;
-  font-size: 30px !important;
-  line-height: 32px !important;
-}
-html[data-dsh-overlay="true"] .dsh-overlay-browser-address {
-  min-width: 0 !important;
-  flex: 1 1 auto !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-  color: rgba(255, 255, 255, 0.72) !important;
-  font-size: 12px !important;
-}
-html[data-dsh-overlay="true"] .dsh-overlay-browser-frame {
-  display: block !important;
-  width: 100% !important;
-  min-height: 0 !important;
-  flex: 1 1 auto !important;
-  border: 0 !important;
-  background: #fff !important;
-}
-
 /* Floating black whale button at top-left */
 .dsh-overlay-whale-btn {
   position: fixed !important;
