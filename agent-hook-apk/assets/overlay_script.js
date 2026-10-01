@@ -453,14 +453,21 @@
     };
     resetRightSidebarOnOverlayOpen();
 
-    // 7. Horizontal navigation gestures for the two DSH sidebars.
-    // Home: swipe right -> left/session sidebar; swipe left -> right/content sidebar.
-    // Left sidebar: swipe left -> close. Right sidebar: swipe right -> close.
+    // 7. Finger-tracked horizontal drawer gestures.
+    // The center/Home surface never changes size. Sidebars are fixed overlays
+    // and their transform follows the finger until release.
     var swipeStartX = 0;
     var swipeStartY = 0;
+    var swipeLastX = 0;
+    var swipeStartTime = 0;
     var swipeTracking = false;
-    var SWIPE_MIN_X = 56;
+    var swipeMode = null; // open-left | close-left | open-right | close-right
+    var swipePanel = null;
+    var swipeWidth = 0;
+    var SWIPE_LOCK_X = 10;
     var SWIPE_DOMINANCE = 1.05;
+    var SWIPE_COMMIT_RATIO = 0.24;
+    var SWIPE_FLING_VELOCITY = 0.45; // px/ms
 
     var leftSidebarIsOpen = function () {
       var frame = document.querySelector('[class*="_frame"]');
@@ -469,6 +476,14 @@
 
     var rightSidebarIsOpen = function () {
       return !!document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
+    };
+
+    var getLeftDrawer = function () {
+      return document.querySelector('[class*="_sidebarCol"]');
+    };
+
+    var getRightDrawer = function () {
+      return document.querySelector('[class*="_rightbarCol"]');
     };
 
     var openLeftSidebar = function () {
@@ -512,8 +527,85 @@
       return !!(target && target.closest && target.closest(
         'input, textarea, select, [contenteditable="true"], [role="textbox"], ' +
         '[data-lexical-editor], [data-composer-input], ' +
-        '[data-sidebar-right-tab] iframe, [class*="_resizer"], [class*="_resizeHandle"]'
+        '[class*="_resizer"], [class*="_resizeHandle"]'
       ));
+    };
+
+    var clearDrawerInlineTransform = function () {
+      if (!swipePanel) return;
+      var panel = swipePanel;
+      document.documentElement.removeAttribute("data-dsh-sidebar-dragging");
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          panel.style.removeProperty("transform");
+          panel.style.removeProperty("pointer-events");
+        });
+      });
+    };
+
+    var setDrawerPosition = function (x) {
+      if (!swipePanel) return;
+      swipePanel.style.setProperty("transform", "translate3d(" + x + "px,0,0)", "important");
+      swipePanel.style.setProperty("pointer-events", "auto", "important");
+    };
+
+    var beginDrawerMode = function (mode) {
+      swipeMode = mode;
+      swipeWidth = Math.max(1, document.documentElement.clientWidth || window.innerWidth || 1);
+
+      if (mode === "open-left") {
+        swipePanel = getLeftDrawer();
+        if (!swipePanel || !openLeftSidebar()) return false;
+        setDrawerPosition(-swipeWidth);
+      } else if (mode === "close-left") {
+        swipePanel = getLeftDrawer();
+        if (!swipePanel) return false;
+        setDrawerPosition(0);
+      } else if (mode === "open-right") {
+        swipePanel = getRightDrawer();
+        if (!swipePanel || !openRightSidebar()) return false;
+        setDrawerPosition(swipeWidth);
+      } else if (mode === "close-right") {
+        swipePanel = getRightDrawer();
+        if (!swipePanel) return false;
+        setDrawerPosition(0);
+      } else {
+        return false;
+      }
+
+      document.documentElement.setAttribute("data-dsh-sidebar-dragging", mode);
+      return true;
+    };
+
+    var updateDrawerDrag = function (dx) {
+      if (!swipeMode || !swipePanel) return;
+      if (swipeMode === "open-left") {
+        setDrawerPosition(Math.min(0, Math.max(-swipeWidth, -swipeWidth + Math.max(0, dx))));
+      } else if (swipeMode === "close-left") {
+        setDrawerPosition(Math.min(0, Math.max(-swipeWidth, Math.min(0, dx))));
+      } else if (swipeMode === "open-right") {
+        setDrawerPosition(Math.max(0, Math.min(swipeWidth, swipeWidth + Math.min(0, dx))));
+      } else if (swipeMode === "close-right") {
+        setDrawerPosition(Math.max(0, Math.min(swipeWidth, Math.max(0, dx))));
+      }
+    };
+
+    var finishDrawerDrag = function (dx, elapsed) {
+      if (!swipeMode || !swipePanel) return;
+      var progress = Math.min(1, Math.abs(dx) / Math.max(1, swipeWidth));
+      var velocity = Math.abs(dx) / Math.max(1, elapsed);
+      var commit = progress >= SWIPE_COMMIT_RATIO || velocity >= SWIPE_FLING_VELOCITY;
+      var mode = swipeMode;
+
+      if (mode === "open-left" && !commit) closeLeftSidebar();
+      if (mode === "close-left" && commit) closeLeftSidebar();
+      if (mode === "open-right" && !commit) closeRightSidebar();
+      if (mode === "close-right" && commit) closeRightSidebar();
+
+      clearDrawerInlineTransform();
+      swipeMode = null;
+      swipePanel = null;
+      swipeWidth = 0;
     };
 
     var onSwipeStart = function (event) {
@@ -526,34 +618,77 @@
         swipeTracking = false;
         return;
       }
-      swipeStartX = event.touches[0].clientX;
+      swipeStartX = swipeLastX = event.touches[0].clientX;
       swipeStartY = event.touches[0].clientY;
+      swipeStartTime = performance.now();
       swipeTracking = true;
+      swipeMode = null;
+      swipePanel = null;
+    };
+
+    var onSwipeMove = function (event) {
+      if (!swipeTracking || !event.touches || event.touches.length !== 1) return;
+
+      var x = event.touches[0].clientX;
+      var y = event.touches[0].clientY;
+      var dx = x - swipeStartX;
+      var dy = y - swipeStartY;
+      var absX = Math.abs(dx);
+      var absY = Math.abs(dy);
+      swipeLastX = x;
+
+      if (!swipeMode) {
+        if (absX < SWIPE_LOCK_X) return;
+        if (absX < absY * SWIPE_DOMINANCE) {
+          swipeTracking = false;
+          return;
+        }
+
+        var mode;
+        if (leftSidebarIsOpen()) {
+          if (dx >= 0) { swipeTracking = false; return; }
+          mode = "close-left";
+        } else if (rightSidebarIsOpen()) {
+          if (dx <= 0) { swipeTracking = false; return; }
+          mode = "close-right";
+        } else {
+          mode = dx > 0 ? "open-left" : "open-right";
+        }
+
+        if (!beginDrawerMode(mode)) {
+          swipeTracking = false;
+          return;
+        }
+      }
+
+      if (event.cancelable) event.preventDefault();
+      updateDrawerDrag(dx);
     };
 
     var onSwipeEnd = function (event) {
       if (!swipeTracking) return;
       swipeTracking = false;
-      if (!event.changedTouches || event.changedTouches.length !== 1) return;
 
-      var dx = event.changedTouches[0].clientX - swipeStartX;
-      var dy = event.changedTouches[0].clientY - swipeStartY;
-      var absX = Math.abs(dx);
-      var absY = Math.abs(dy);
-      if (absX < SWIPE_MIN_X || absX < absY * SWIPE_DOMINANCE) return;
+      if (!swipeMode) return;
+      var endX = swipeLastX;
+      if (event.changedTouches && event.changedTouches.length === 1) {
+        endX = event.changedTouches[0].clientX;
+      }
+      var dx = endX - swipeStartX;
+      finishDrawerDrag(dx, performance.now() - swipeStartTime);
+    };
 
-      // Sidebars consume only their closing direction. The home view uses the
-      // opposite directions to enter the left and right sidebars.
-      if (leftSidebarIsOpen()) {
-        if (dx < 0) closeLeftSidebar();
-        return;
-      }
-      if (rightSidebarIsOpen()) {
-        if (dx > 0) closeRightSidebar();
-        return;
-      }
-      if (dx > 0) openLeftSidebar();
-      else openRightSidebar();
+    var onSwipeCancel = function () {
+      if (!swipeTracking) return;
+      swipeTracking = false;
+      if (!swipeMode) return;
+
+      if (swipeMode === "open-left") closeLeftSidebar();
+      if (swipeMode === "open-right") closeRightSidebar();
+      clearDrawerInlineTransform();
+      swipeMode = null;
+      swipePanel = null;
+      swipeWidth = 0;
     };
 
     var rightSwipeEdge = document.querySelector(".dsh-overlay-right-swipe-edge");
@@ -565,7 +700,9 @@
     }
 
     document.addEventListener("touchstart", onSwipeStart, { capture: true, passive: true });
+    document.addEventListener("touchmove", onSwipeMove, { capture: true, passive: false });
     document.addEventListener("touchend", onSwipeEnd, { capture: true, passive: true });
+    document.addEventListener("touchcancel", onSwipeCancel, { capture: true, passive: true });
 
     // The current DSH build already ships the right-sidebar/document-preview
     // stack. File links should be allowed to reach its native click handlers;
