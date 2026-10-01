@@ -48,18 +48,48 @@ done
 echo "[build] 5. Zipaligning APK to 4-byte boundary..."
 zipalign -p -f 4 "build/apk/unaligned.apk" "build/apk/aligned.apk"
 
-echo "[build] 6. Signing APK with debug key..."
-if [ ! -f "/root/debug.keystore" ]; then
-    keytool -genkey -v -keystore /root/debug.keystore \
-        -storepass android -alias androiddebugkey -keypass android \
-        -keyalg RSA -keysize 2048 -validity 10000 \
-        -dname "CN=Android Debug,O=Android,C=US"
+echo "[build] 6. Signing APK..."
+SIGNING_KEYSTORE="${APK_SIGNING_KEYSTORE:-}"
+SIGNING_STORE_PASSWORD="${APK_SIGNING_STORE_PASSWORD:-}"
+SIGNING_KEY_ALIAS="${APK_SIGNING_KEY_ALIAS:-}"
+SIGNING_KEY_PASSWORD="${APK_SIGNING_KEY_PASSWORD:-}"
+
+if [ -n "$SIGNING_KEYSTORE" ]; then
+    if [ ! -f "$SIGNING_KEYSTORE" ]; then
+        echo "[build] ERROR: APK_SIGNING_KEYSTORE does not exist: $SIGNING_KEYSTORE" >&2
+        exit 1
+    fi
+    if [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+        echo "[build] ERROR: fixed signing is incomplete; set APK_SIGNING_STORE_PASSWORD, APK_SIGNING_KEY_ALIAS and APK_SIGNING_KEY_PASSWORD" >&2
+        exit 1
+    fi
+    echo "[build] Using configured fixed signing keystore"
+else
+    if [ "${CI:-}" = "true" ]; then
+        echo "[build] ERROR: CI builds require a fixed APK signing keystore" >&2
+        exit 1
+    fi
+
+    echo "[build] No fixed keystore configured; using local debug keystore"
+    SIGNING_KEYSTORE="/root/debug.keystore"
+    SIGNING_STORE_PASSWORD="android"
+    SIGNING_KEY_ALIAS="androiddebugkey"
+    SIGNING_KEY_PASSWORD="android"
+
+    if [ ! -f "$SIGNING_KEYSTORE" ]; then
+        keytool -genkey -v -keystore "$SIGNING_KEYSTORE" \
+            -storepass "$SIGNING_STORE_PASSWORD" \
+            -alias "$SIGNING_KEY_ALIAS" \
+            -keypass "$SIGNING_KEY_PASSWORD" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+    fi
 fi
 
-"$APKSIGNER" sign --ks /root/debug.keystore \
-    --ks-pass pass:android \
-    --ks-key-alias androiddebugkey \
-    --key-pass pass:android \
+"$APKSIGNER" sign --ks "$SIGNING_KEYSTORE" \
+    --ks-pass "pass:$SIGNING_STORE_PASSWORD" \
+    --ks-key-alias "$SIGNING_KEY_ALIAS" \
+    --key-pass "pass:$SIGNING_KEY_PASSWORD" \
     --out "build/agent_hook.apk" \
     "build/apk/aligned.apk"
 
