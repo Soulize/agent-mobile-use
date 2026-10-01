@@ -432,6 +432,39 @@
     }
     window.addEventListener("resize", onViewportResize);
 
+    // Keep the overlay out of a persisted right-sidebar state. Unlike the
+    // desktop/Web app, reopening the Android overlay is expected to start on
+    // the conversation home surface, matching the left sidebar behavior.
+    var resetRightSidebarOnOverlayOpen = function () {
+      var attempts = 0;
+      var closeWhenReady = function () {
+        var panel = document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
+        if (panel) {
+          var toggle = panel.querySelector('[data-sidebar-right-toggle]') ||
+            document.querySelector('[data-sidebar-right-toggle]');
+          if (toggle) {
+            toggle.click();
+            return;
+          }
+        }
+        if (attempts++ < 20) setTimeout(closeWhenReady, 100);
+      };
+      setTimeout(closeWhenReady, 0);
+    };
+    resetRightSidebarOnOverlayOpen();
+
+    // Android edge-to-edge WebView does not reliably expose CSS safe-area
+    // env() values. Mirror the actual status-bar inset through the JS bridge.
+    var syncAndroidSafeArea = function () {
+      try {
+        var top = window.DSHOverlayBridge && window.DSHOverlayBridge.getStatusBarInsetTop
+          ? Number(window.DSHOverlayBridge.getStatusBarInsetTop()) || 0
+          : 0;
+        document.documentElement.style.setProperty("--dsh-android-safe-top", Math.max(0, top) + "px");
+      } catch (e) {}
+    };
+    syncAndroidSafeArea();
+
     // 7. Horizontal navigation gestures for the two DSH sidebars.
     // Home: swipe right -> left/session sidebar; swipe left -> right/content sidebar.
     // Left sidebar: swipe left -> close. Right sidebar: swipe right -> close.
@@ -447,7 +480,8 @@
     };
 
     var rightSidebarIsOpen = function () {
-      return !!document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
+      return document.documentElement.hasAttribute("data-dsh-overlay-browser-open") ||
+        !!document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
     };
 
     var openLeftSidebar = function () {
@@ -478,6 +512,12 @@
     };
 
     var closeRightSidebar = function () {
+      var overlayBrowser = document.querySelector(".dsh-overlay-browser");
+      if (overlayBrowser) {
+        overlayBrowser.remove();
+        document.documentElement.removeAttribute("data-dsh-overlay-browser-open");
+        return true;
+      }
       var panel = document.querySelector('[data-sidebar-right-session][data-sidebar-right-open]');
       if (!panel) return false;
       var toggle = panel.querySelector('[data-sidebar-right-toggle]') ||
@@ -486,6 +526,72 @@
       toggle.click();
       return true;
     };
+
+    var openUrlInRightSidebar = function (url) {
+      if (!/^https?:\/\//i.test(url || "")) return false;
+      closeLeftSidebar();
+
+      var existing = document.querySelector(".dsh-overlay-browser");
+      if (existing) existing.remove();
+
+      var shell = document.createElement("section");
+      shell.className = "dsh-overlay-browser";
+      shell.setAttribute("aria-label", "Web preview");
+
+      var bar = document.createElement("div");
+      bar.className = "dsh-overlay-browser-bar";
+
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "dsh-overlay-browser-close";
+      close.setAttribute("aria-label", "Close web preview");
+      close.textContent = "‹";
+      close.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRightSidebar();
+      });
+
+      var address = document.createElement("div");
+      address.className = "dsh-overlay-browser-address";
+      address.textContent = url;
+
+      var frame = document.createElement("iframe");
+      frame.className = "dsh-overlay-browser-frame";
+      frame.src = url;
+      frame.setAttribute("sandbox", "allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts");
+      frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+
+      bar.appendChild(close);
+      bar.appendChild(address);
+      shell.appendChild(bar);
+      shell.appendChild(frame);
+      document.body.appendChild(shell);
+      document.documentElement.setAttribute("data-dsh-overlay-browser-open", "true");
+      return true;
+    };
+
+    // DSH Web profiles ship the Sidebar Browser disabled by default. Prevent
+    // ordinary HTTP(S) anchors from navigating the host WebView and show them
+    // in the overlay's right-side browser surface instead.
+    var onExternalLinkClick = function (event) {
+      if (event.defaultPrevented || event.button > 0) return;
+      var target = event.target instanceof Element ? event.target : null;
+      var anchor = target && target.closest ? target.closest("a[href]") : null;
+      if (!anchor || anchor.hasAttribute("download")) return;
+
+      var raw = anchor.getAttribute("href") || "";
+      var url;
+      try { url = new URL(raw, window.location.href); } catch (e) { return; }
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
+      if (url.origin === window.location.origin && raw.charAt(0) !== "/") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      openUrlInRightSidebar(url.href);
+    };
+    document.addEventListener("click", onExternalLinkClick, true);
 
     var gestureIgnoredTarget = function (target) {
       return !!(target && target.closest && target.closest(
