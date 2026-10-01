@@ -214,6 +214,35 @@ public class DemoDialogActivity extends Activity {
         }
     };
 
+    private boolean getBooleanExtraCompat(Intent intent, String key, boolean defaultValue) {
+        if (intent == null || key == null || !intent.hasExtra(key)) {
+            return defaultValue;
+        }
+        try {
+            Bundle extras = intent.getExtras();
+            if (extras == null) return defaultValue;
+            Object value = extras.get(key);
+            if (value instanceof Boolean) {
+                return ((Boolean) value).booleanValue();
+            }
+            if (value instanceof Number) {
+                return ((Number) value).intValue() != 0;
+            }
+            if (value instanceof String) {
+                String text = ((String) value).trim();
+                if ("true".equalsIgnoreCase(text) || "1".equals(text) || "yes".equalsIgnoreCase(text) || "on".equalsIgnoreCase(text)) {
+                    return true;
+                }
+                if ("false".equalsIgnoreCase(text) || "0".equals(text) || "no".equalsIgnoreCase(text) || "off".equalsIgnoreCase(text)) {
+                    return false;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to parse boolean extra " + key + ": " + t.getMessage());
+        }
+        return defaultValue;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -224,7 +253,7 @@ public class DemoDialogActivity extends Activity {
             mTargetUrl = intent.getStringExtra("target_url");
             mTargetSessionId = intent.getStringExtra("session_id");
             if (mTargetSessionId == null) mTargetSessionId = intent.getStringExtra("session");
-            mFocusInputOnLaunch = intent.getBooleanExtra("focus_input", false);
+            mFocusInputOnLaunch = getBooleanExtraCompat(intent, "focus_input", false);
         }
 
         mMainHandler = new Handler(Looper.getMainLooper());
@@ -280,7 +309,7 @@ public class DemoDialogActivity extends Activity {
                 sid = intent.getStringExtra("session");
             }
             mTargetSessionId = sid;
-            mFocusInputOnLaunch = intent.getBooleanExtra("focus_input", false);
+            mFocusInputOnLaunch = getBooleanExtraCompat(intent, "focus_input", false);
         } else {
             mTargetUrl = null;
             mTargetSessionId = null;
