@@ -48,18 +48,46 @@ done
 echo "[build] 5. Zipaligning APK to 4-byte boundary..."
 zipalign -p -f 4 "build/apk/unaligned.apk" "build/apk/aligned.apk"
 
-echo "[build] 6. Signing APK with debug key..."
-if [ ! -f "/root/debug.keystore" ]; then
-    keytool -genkey -v -keystore /root/debug.keystore \
-        -storepass android -alias androiddebugkey -keypass android \
-        -keyalg RSA -keysize 2048 -validity 10000 \
-        -dname "CN=Android Debug,O=Android,C=US"
+echo "[build] 6. Signing APK..."
+SIGNING_KEYSTORE="${APK_SIGNING_KEYSTORE:-}"
+SIGNING_PASSWORD="${APK_SIGNING_PASSWORD:-}"
+SIGNING_ALIAS="agentmobileuse"
+
+if [ -n "$SIGNING_KEYSTORE" ]; then
+    if [ ! -f "$SIGNING_KEYSTORE" ]; then
+        echo "[build] ERROR: APK_SIGNING_KEYSTORE does not exist: $SIGNING_KEYSTORE" >&2
+        exit 1
+    fi
+    if [ -z "$SIGNING_PASSWORD" ]; then
+        echo "[build] ERROR: APK_SIGNING_PASSWORD is required for fixed signing" >&2
+        exit 1
+    fi
+    echo "[build] Using configured fixed signing keystore (alias: $SIGNING_ALIAS)"
+else
+    if [ "${CI:-}" = "true" ]; then
+        echo "[build] ERROR: CI builds require APK_SIGNING_KEYSTORE and APK_SIGNING_PASSWORD" >&2
+        exit 1
+    fi
+
+    echo "[build] No fixed keystore configured; using local debug keystore"
+    SIGNING_KEYSTORE="/root/debug.keystore"
+    SIGNING_PASSWORD="android"
+    SIGNING_ALIAS="androiddebugkey"
+
+    if [ ! -f "$SIGNING_KEYSTORE" ]; then
+        keytool -genkey -v -keystore "$SIGNING_KEYSTORE" \
+            -storepass "$SIGNING_PASSWORD" \
+            -alias "$SIGNING_ALIAS" \
+            -keypass "$SIGNING_PASSWORD" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+    fi
 fi
 
-"$APKSIGNER" sign --ks /root/debug.keystore \
-    --ks-pass pass:android \
-    --ks-key-alias androiddebugkey \
-    --key-pass pass:android \
+"$APKSIGNER" sign --ks "$SIGNING_KEYSTORE" \
+    --ks-pass "pass:$SIGNING_PASSWORD" \
+    --ks-key-alias "$SIGNING_ALIAS" \
+    --key-pass "pass:$SIGNING_PASSWORD" \
     --out "build/agent_hook.apk" \
     "build/apk/aligned.apk"
 
