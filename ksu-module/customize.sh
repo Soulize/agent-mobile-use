@@ -10,6 +10,16 @@ pm install -r "$MODPATH/apk/agent_hook.apk" >/dev/null 2>&1
 if [ $? -eq 0 ]; then
     ui_print "- Hook 补丁安装成功"
     pm grant com.agent.mobileuse android.permission.RECORD_AUDIO >/dev/null 2>&1
+
+    # Foreground takeover edge glow is a TYPE_APPLICATION_OVERLAY window.
+    # Reinstalling/re-signing the APK can reset this special app-op on ColorOS,
+    # so repair it automatically whenever the module installs/updates the APK.
+    if appops set com.agent.mobileuse SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 \
+        || cmd appops set com.agent.mobileuse SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1; then
+        ui_print "- 前台接管彩边悬浮窗权限已恢复"
+    else
+        ui_print "! 警告: 无法自动恢复悬浮窗权限，前台接管彩边可能不可见"
+    fi
 else
     ui_print "! 警告: APK 安装失败，请检查系统环境"
 fi
