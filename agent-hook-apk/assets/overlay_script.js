@@ -438,9 +438,8 @@
     var swipeStartX = 0;
     var swipeStartY = 0;
     var swipeTracking = false;
-    var SWIPE_MIN_X = 72;
-    var SWIPE_MAX_Y = 64;
-    var SWIPE_DOMINANCE = 1.35;
+    var SWIPE_MIN_X = 56;
+    var SWIPE_DOMINANCE = 1.05;
 
     var leftSidebarIsOpen = function () {
       var frame = document.querySelector('[class*="_frame"]');
@@ -520,7 +519,7 @@
       var dy = event.changedTouches[0].clientY - swipeStartY;
       var absX = Math.abs(dx);
       var absY = Math.abs(dy);
-      if (absX < SWIPE_MIN_X || absY > SWIPE_MAX_Y || absX < absY * SWIPE_DOMINANCE) return;
+      if (absX < SWIPE_MIN_X || absX < absY * SWIPE_DOMINANCE) return;
 
       // Sidebars consume only their closing direction. The home view uses the
       // opposite directions to enter the left and right sidebars.
