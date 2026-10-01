@@ -13,58 +13,42 @@ permissions:
   contents: read
 
 env:
-  ANDROID_HOME: /usr/local/lib/android/sdk
-  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  ANDROID_API: '36'
+  ANDROID_BUILD_TOOLS: '36.0.0'
 
 jobs:
   build-ksu:
     runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
 
-      - name: Set up Java 17 for Android SDK
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.22.x'
+          go-version-file: vd-server-go/go.mod
+          cache: false
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.5.0'
+          cache-provider: basic
 
       - name: Install Android SDK components
         shell: bash
         run: |
+          set -euxo pipefail
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-23" "build-tools;28.0.3"
-
-      - name: Switch to Java 8 for legacy dx builds
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '8'
-
-      - name: Prepare legacy build paths and Xposed API
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          sudo mkdir -p /usr/lib/android-sdk/platforms/android-23
-          sudo mkdir -p /usr/lib/android-sdk/build-tools/debian
-          sudo mkdir -p /root/xposed_lib
-
-          sudo ln -sf "$ANDROID_HOME/platforms/android-23/android.jar"             /usr/lib/android-sdk/platforms/android-23/android.jar
-
-          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/dx"             /usr/lib/android-sdk/build-tools/debian/dx
-          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/aapt" /usr/bin/aapt
-          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/zipalign" /usr/bin/zipalign
-          sudo ln -sf "$ANDROID_HOME/build-tools/28.0.3/apksigner" /usr/bin/apksigner
-
-          curl -fL             https://artifactory.appodeal.com/appodeal-public/de/robv/android/xposed/api/82/api-82.jar             -o /tmp/xposed-api-stub.jar
-          sudo cp /tmp/xposed-api-stub.jar /root/xposed_lib/xposed-api-stub.jar
+          sdkmanager             "platforms;android-$ANDROID_API"             "build-tools;$ANDROID_BUILD_TOOLS"
 
       - name: Prepare fixed APK signing key
         shell: bash
@@ -92,38 +76,59 @@ jobs:
         run: |
           set -euxo pipefail
           chmod +x agent-hook-apk/build.sh
-          sudo -E bash agent-hook-apk/build.sh
+          ./agent-hook-apk/build.sh
 
       - name: Build Java tools
         shell: bash
         run: |
           set -euxo pipefail
           chmod +x vd-tool-java/build.sh
-          sudo -E bash vd-tool-java/build.sh
+          ./vd-tool-java/build.sh
 
-      - name: Test and build ARM64 Android vd_server
+      - name: Build Android ARM64 vd_server
         shell: bash
         run: |
           set -euxo pipefail
-          pushd vd-server-go
-          go test ./...
-          CGO_ENABLED=0 GOOS=android GOARCH=arm64             go build -ldflags="-s -w" -o vd_server .
-          popd
-          file vd-server-go/vd_server
+          chmod +x vd-server-go/build.sh
+          ./vd-server-go/build.sh
 
       - name: Pack complete KernelSU module
         shell: bash
         run: |
           set -euxo pipefail
           chmod +x ksu-module/pack.sh
-          bash ksu-module/pack.sh
-          unzip -l agent-mobile-use-ksu.zip
-          sha256sum agent-mobile-use-ksu.zip
+          ./ksu-module/pack.sh
+
+      - name: Verify outputs and report sizes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VERSION="$(sed -n 's/^version=//p' ksu-module/module.prop)"
+          KSU_ZIP="release/agent-mobile-use-ksu-v${VERSION}.zip"
+
+          "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner"             verify --verbose --print-certs agent-hook-apk/build/agent_hook.apk
+
+          file vd-server-go/vd_server | grep -q "ARM aarch64"
+          test -s vd-tool-java/bin/agent_tools.dex
+          test -s vd-tool-java/bin/agent_vd.dex
+          unzip -t "$KSU_ZIP"
+
+          stat -c 'agent_hook.apk bytes=%s' agent-hook-apk/build/agent_hook.apk
+          stat -c 'agent_tools.dex bytes=%s' vd-tool-java/bin/agent_tools.dex
+          stat -c 'agent_vd.dex bytes=%s' vd-tool-java/bin/agent_vd.dex
+          stat -c 'vd_server bytes=%s' vd-server-go/vd_server
+          stat -c 'ksu_zip bytes=%s' "$KSU_ZIP"
+
+          echo '--- APK entries ---'
+          unzip -l agent-hook-apk/build/agent_hook.apk
+          echo '--- KSU entries ---'
+          unzip -l "$KSU_ZIP"
+          sha256sum "$KSU_ZIP"
 
       - name: Upload KernelSU package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: agent-mobile-use-ksu-main
-          path: agent-mobile-use-ksu.zip
+          name: agent-mobile-use-ksu
+          path: release/agent-mobile-use-ksu-v0.8.0-alpha.zip
           if-no-files-found: error
           retention-days: 14
