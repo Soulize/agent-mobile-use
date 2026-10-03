@@ -173,6 +173,73 @@ html[data-dsh-overlay="true"] [class*="_boot"] [class*="_card"] {
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
+
+
+  /* dsh-prompt-optimizer compatibility.
+     The plugin mounts a relatively wide control group into conversation.input.left.
+     The stock mobile override keeps the composer tool row nowrap, which can squeeze
+     that group down to its min-content width and make the option controls stack on
+     top of each other. Give the tools line the full row only when this plugin is
+     present, while keeping the stock layout unchanged for every other composer. */
+  html[data-dsh-overlay="true"] [data-slot="conversation.composer.bar"] [class*="_row"]:has([data-po06="bar"]) {
+    flex-wrap: wrap !important;
+  }
+  html[data-dsh-overlay="true"] [data-slot="conversation.composer.bar"] [class*="_tools"]:has([data-po06="bar"]) {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex-wrap: nowrap !important;
+  }
+  html[data-dsh-overlay="true"] [data-slot="conversation.composer.bar"]:has([data-po06="bar"]) [class*="_trailing"] {
+    margin-left: auto !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="bar"] {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="bar-row-1"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="options-btn"] {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="options-summary"] {
+    min-width: 0 !important;
+    max-width: 110px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="help-btn"] {
+    flex: 0 0 auto !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="options-pop"] {
+    width: min(300px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="options-pop"] > div {
+    min-width: 0 !important;
+    grid-template-columns: 58px minmax(0, 1fr) !important;
+  }
+  html[data-dsh-overlay="true"] [data-po06="options-pop"] select,
+  html[data-dsh-overlay="true"] [data-po06="options-pop"] [role="slider"],
+  html[data-dsh-overlay="true"] [data-po06="options-pop"] input {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
 }
 
 /* ── overlay floating chat mode ── */
