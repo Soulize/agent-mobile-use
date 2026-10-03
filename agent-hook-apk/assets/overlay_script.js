@@ -185,6 +185,97 @@
 
     var cfg = window.__DSH_MOBILE_CONFIG__ || {};
 
+    // dsh-prompt-optimizer steer compatibility.
+    // The plugin recognizes DSH's "input.send.steer" action, but its public
+    // inputActions.submit() release path is hard-wired by DSH to queue mode.
+    // If the optimizer intercepts a live steer, the message is therefore
+    // released as a queued message instead of entering the running turn.
+    //
+    // DSH does not expose submit(mode) to conversation.input.left slots, so the
+    // safe compatibility rule in the overlay is: let native DSH own steer,
+    // while ordinary send/queue still pass through the optimizer. The plugin
+    // already ignores buttons inside any [data-po06] node and key events whose
+    // editor is inside [data-po06="panel"], so mark only the native steer
+    // controls while that action is active.
+    var po06SteerLabels = {
+      "插话发送": true,
+      "Steer message": true
+    };
+    var po06SteerSyncPending = false;
+    var syncPo06SteerBypass = function () {
+      po06SteerSyncPending = false;
+      try {
+        var cards = document.querySelectorAll("[data-composer-card]");
+        for (var ci = 0; ci < cards.length; ci++) {
+          var card = cards[ci];
+          var buttons = card.querySelectorAll("button");
+          var steerButton = null;
+          for (var bi = 0; bi < buttons.length; bi++) {
+            var label = buttons[bi].getAttribute("aria-label") || "";
+            if (po06SteerLabels[label]) {
+              steerButton = buttons[bi];
+              break;
+            }
+          }
+
+          var markedButtons = card.querySelectorAll('[data-dsh-po06-steer-bypass="button"]');
+          for (var mbi = 0; mbi < markedButtons.length; mbi++) {
+            var mb = markedButtons[mbi];
+            if (mb === steerButton) continue;
+            mb.removeAttribute("data-dsh-po06-steer-bypass");
+            if (mb.getAttribute("data-po06") === "steer-bypass") mb.removeAttribute("data-po06");
+          }
+
+          var markedEditors = card.querySelectorAll('[data-dsh-po06-steer-bypass="editor"]');
+          for (var mei = 0; mei < markedEditors.length; mei++) {
+            var me = markedEditors[mei];
+            if (steerButton) continue;
+            me.removeAttribute("data-dsh-po06-steer-bypass");
+            if (me.getAttribute("data-po06") === "panel") me.removeAttribute("data-po06");
+          }
+
+          if (!steerButton) continue;
+
+          steerButton.setAttribute("data-dsh-po06-steer-bypass", "button");
+          var buttonPo06 = steerButton.getAttribute("data-po06");
+          if (!buttonPo06 || buttonPo06 === "steer-bypass") {
+            steerButton.setAttribute("data-po06", "steer-bypass");
+          }
+
+          var editor = card.querySelector(
+            '[data-composer-input][contenteditable]:not([contenteditable="false"]), ' +
+            '[data-lexical-editor][contenteditable]:not([contenteditable="false"]), ' +
+            '[contenteditable]:not([contenteditable="false"])'
+          );
+          if (editor) {
+            editor.setAttribute("data-dsh-po06-steer-bypass", "editor");
+            var editorPo06 = editor.getAttribute("data-po06");
+            if (!editorPo06 || editorPo06 === "panel") {
+              editor.setAttribute("data-po06", "panel");
+            }
+          }
+        }
+      } catch (e) {}
+    };
+    var schedulePo06SteerBypassSync = function () {
+      if (po06SteerSyncPending) return;
+      po06SteerSyncPending = true;
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(syncPo06SteerBypass);
+      } else {
+        setTimeout(syncPo06SteerBypass, 0);
+      }
+    };
+    schedulePo06SteerBypassSync();
+    try {
+      new MutationObserver(schedulePo06SteerBypassSync).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["aria-label", "contenteditable"]
+      });
+    } catch (e) {}
+
     // Optional one-shot launch focus requested by DemoDialogActivity.
     if (cfg.focusInputOnLaunch === true) {
       var focusInputAttempts = 0;

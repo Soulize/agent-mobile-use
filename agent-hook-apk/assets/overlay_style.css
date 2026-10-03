@@ -1275,3 +1275,17 @@ html[data-dsh-overlay="true"] [data-chat-flow-kind="manual-compaction"] {
     animation: none !important;
   }
 }
+
+/* dsh-prompt-optimizer terminal result suppression.
+   In the DSH overlay, keep the optimizer's live/review/error controls usable,
+   but do not expose the post-send floating review entry. Reopening the terminal
+   result panel in the overlay WebView can stall that overlay; the normal DSH UI
+   remains untouched because every selector is gated by data-dsh-overlay. */
+html[data-dsh-overlay="true"] [data-po06="intercept-ball"],
+html[data-dsh-overlay="true"] [data-po06="intercept"][data-po06-phase="sent"],
+html[data-dsh-overlay="true"] [data-po06="intercept"][data-po06-phase="skipped"],
+html[data-dsh-overlay="true"] [data-po06="intercept"][data-po06-phase="failed"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
